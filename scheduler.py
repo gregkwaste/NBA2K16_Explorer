@@ -2,23 +2,12 @@ class SchedulerEntry:
 
     def __init__(self):
         self.name = None
-        self.selmod = None
-        self.arch_name = None
-        self.subarch_name = None
-        self.subarch_offset = None
-        self.subarch_size = None
-        self.subfile_index = None
-        self.subfile_name = None
-        self.subfile_off = None
-        self.subfile_type = None
-        self.subfile_size = None
-        self.local_off = None
         self.oldDecompSize = None
-        self.newDataSize = None
+        self.newDecompSize = None
         self.oldCompSize = None
         self.newCompSize = None
-        self.chksm = None
-        self.diff = None
+        self.type = None
+        self.localOffset = None
 
 
 def addToScheduler(self, sched, k):

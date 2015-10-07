@@ -9,10 +9,12 @@ import sys
 import os
 import gc
 from StringIO import StringIO
-from nba2k15commonvars import *
+from nba2k16commonvars import *
 from parsing_functions import *
 from json_parser import *
+from scheduler import *
 from dds import *
+from _winreg import *
 
 
 class ModelPanel(QDialog):
@@ -183,6 +185,14 @@ class AboutDialog(QWidget):
         self.setLayout(layout)
 
 
+class iffFileInformation:
+
+    def __init__(self):
+        self.name = ''
+        self.offset = None
+        self.size = None
+
+
 class IffEditorWindow(QMainWindow):
 
     def __init__(self, parent=None):
@@ -216,7 +226,8 @@ class IffEditorWindow(QMainWindow):
         vlayout = QVBoxLayout()
 
         self.archiveTable = MyTableView(parent=gbox)
-        self.archiveTable.horizontalHeader().setResizeMode(QHeaderView.Stretch)
+        self.archiveTable.horizontalHeader().setResizeMode(QHeaderView.Interactive)
+
         self.archiveTable.horizontalHeader().setMovable(True)
         self.archiveTable.setSortingEnabled(True)
         self.archiveTable.sortByColumn(1, Qt.AscendingOrder)
@@ -258,7 +269,13 @@ class IffEditorWindow(QMainWindow):
 
         mainlayout.addWidget(vertlist)
         self.setCentralWidget(mainlayout)
-        self.resize(1276, 700)
+        self.resize(1400, 700)
+
+        # Move Splitter
+        sizes = mainlayout.sizes()
+        sizes[0] = 800
+        sizes[1] = 1400 - 800
+        mainlayout.setSizes(sizes)
 
         # Configure Menu Bar
         self.menubar = QMenuBar(self)
@@ -288,32 +305,48 @@ class IffEditorWindow(QMainWindow):
 
         # File and Data Handles
         self._file = None
+        self._fileProps = iffFileInformation()
 
         # TESTING SECTION
-        self.openFile('png2468.iff')
+        # self.openFile('png2468.iff')
 
-    def openFile(self, name=None):
+    def openFile(self):
         # Close previously open file handle
         if self._file:
             self._file.close()
+
         # Try Opening File
-        if not name:
-            location = QFileDialog.getOpenFileName(
-                caption='Select .iff file', filter='*.iff')
-            if location:
-                self._file = open(location[0], 'rb')
-            else:
-                print('Canceled')
-                return
+
+        location = QFileDialog.getOpenFileName(
+            caption='Select .iff file', filter='*.iff')
+        if location[0]:
+            self._file = StringIO()
+            t = open(location[0], 'rb')
+            self._fileProps.name = os.path.basename(t.name)
+            self._file.write(t.read())
+            t.close()
+            self._file.seek(0)
+            self.openFileData()
         else:
-            print('Opening File', name)
-            self._file = open(name, 'rb')
+            print('Canceled')
+            return
+
+    def openFileData(self):
+        # Close previously open file handle
+        if not self._file:
+            print 'No Active File Handle'
+            return
 
         # Add data to the Archive Contents Table
         self.archiveContents = MyTableModel(
             archive_parser(self._file),
             ['Name', 'Offset', 'Comp. Size', 'Decomp. Size', 'Type'])
         self.archiveTable.setModel(self.archiveContents)
+        self.archiveTable.horizontalHeader().setResizeMode(QHeaderView.ResizeToContents)
+        self.archiveTable.horizontalHeader().setStretchLastSection(True)
+        # lid = self.archiveTable.horizontalHeader().logicalIndex(4)
+        # self.archiveTable.horizontalHeader().resizeSection(lid, 40)
+
         gc.collect()
         # print archive_parser(self._file)
 
@@ -332,7 +365,7 @@ class IffEditorWindow(QMainWindow):
         menu.addAction(self.tr("Export"))
         if not len(selmod) > len(self.archiveContents.header):
             menu.addAction(self.tr("Import"))
-
+            menu.addAction(self.tr("ParseModel"))
         res = menu.exec_(self.archiveTable.viewport().mapToGlobal(pos))
 
         if not res:
@@ -341,13 +374,72 @@ class IffEditorWindow(QMainWindow):
         if res.text() == 'Export':
             self.export_items(selmod)
         elif res.text() == 'Import':
-            self.import_item(selmod)
+            self.import_items(selmod)
+        elif res.text() == 'ParseModel':
+            self.tryToParseModel(selmod)
+
+    def tryToParseModel(self, selmod):
+        name = self.archiveContents.data(selmod[0], Qt.DisplayRole)
+        off = self.archiveContents.data(selmod[1], Qt.DisplayRole)
+        comp_size = self.archiveContents.data(selmod[2], Qt.DisplayRole)
+        decomp_size = self.archiveContents.data(selmod[3], Qt.DisplayRole)
+        typ = self.archiveContents.data(selmod[4], Qt.DisplayRole)
+        print('Trying to Parse Model: ', name)
+
+        self._file.seek(off)
+        data = StringIO()
+
+        if typ == 'LZMA':
+            print('Loading LZMA File')
+            data.write(self._file.read(comp_size))
+            data.seek(0x4)
+            k = StringIO()
+            k.write(pylzma.decompress_compat(data.read()))
+            data.close()
+            k.seek(0)
+            data = k
+        else:
+            print('No Compression')
+            data.write(self._file.read(decomp_size))
+            data.seek(0)
+
+        txtdata = str(data.read())
+        # Parsing Json in order to find out the correct model filename
+        jsondata = NbaJsonParser(txtdata)
+        # Empty objects in glwidget
+        self.glwidget.objects = []
+        # get binary files
+        count = 0
+        for mindex in jsondata['Model']:
+            binaryname = jsondata['Model'][mindex]['Binary']
+            print binaryname
+            t = StringIO()  # Prepare binary file
+            # Get binaryfiledata
+            for row in self.archiveContents.mylist:
+                if row[0] == binaryname:
+                    off = row[1]
+                    size = row[2]
+                    typ = row[4]
+                    print 'Model File data', off, size, typ
+                    # Most of the times it will be LZMA
+                    # I'm checking just in case
+                    if typ == 'LZMA':
+                        self._file.seek(off + 4)
+                        temp = self._file.read(size - 4)
+                        t.write(pylzma.decompress_compat(temp))
+                        t.seek(0)
+                        break
+            count += 1
+            self.glwidget.customModel(parseModel(
+                jsondata, t, jsondata['Model'][mindex]))
+            t.close()
+        print 'Models Loaded', len(self.glwidget.objects)
 
     def export_items(self, selection):
         print('Exporting Items')
         row_num = len(selection) // 5
         # Get archive name
-        arch_name = '_' + self._file.name
+        arch_name = '_' + self._fileProps.name
 
         selmod = self.archiveTable.selectionModel().selectedIndexes()
 
@@ -366,22 +458,23 @@ class IffEditorWindow(QMainWindow):
                 selection[5 * i + 1], Qt.DisplayRole)  # get file offset
             typ = self.archiveContents.data(
                 selection[5 * i + 4], Qt.DisplayRole)  # get file type
-            size = self.archiveContents.data(
-                selection[5 * i + 2], Qt.DisplayRole)  # get file size
+            comp_size = self.archiveContents.data(
+                selection[5 * i + 2], Qt.DisplayRole)  # get file comp_size
 
-            print(f_name, off, typ, size)
+            print(f_name, off, typ, comp_size)
 
-            if size == 0:
+            if comp_size == 0:
                 continue
 
             f_name = os.path.join(
                 selected_dir, arch_name, str(f_name))
+            print f_name
             # f_name=selected_dir+'\\'+arch_name + '\\'+str(f_name)
 
             t = StringIO()  # open temporary memory stream
             self._file.seek(off)
             # write data to temporary file
-            t.write(self._file.read(size))
+            t.write(self._file.read(comp_size))
 
             if typ == 'LZMA':
                 print('Decompressing LZMA')
@@ -419,26 +512,66 @@ class IffEditorWindow(QMainWindow):
                 'File Exported in: ' + str(f_name))  # notify the user
 
     def import_items(self, selection):
-        # Check for one one row selection only
-        row = selmod[0].row()
-        for i in selmod:
-            if i.row() != row:
-                msgbox = QMessageBox(
-                    QMessageBox.Warning, 'Error',
-                    "Import one file at a time", QMessageBox.Ok)
-                msgbox.exec_()
-                return
         # Import routine
+        # Get Original file Data
+        f_name = self.archiveContents.data(
+            selection[0], Qt.DisplayRole)  # get file name
+        off = self.archiveContents.data(
+            selection[1], Qt.DisplayRole)  # get file offset
+        typ = self.archiveContents.data(
+            selection[4], Qt.DisplayRole)  # get file type
+        comp_size = self.archiveContents.data(
+            selection[2], Qt.DisplayRole)  # get file comp_size
+        decomp_size = self.archiveContents.data(
+            selection[3], Qt.DisplayRole)  # get file decomp_size
+
+        print 'Replacing', f_name, off, typ, comp_size
+
         location = QFileDialog.getOpenFileName(
             caption="Select file for Import",
-            filter='*.zip ;; *.ogg ;; *.*')
+            filter='*.zip;;*.png;;*.jpg;;*.dds;;*.model')
         if not location[0]:
             return
-        print(location)
 
+        # Store Old File Data
+        self._file.seek(off + 0x4)
+        if typ == 'LZMA':
+            print('Compressed -Import Func-')
+            temp = self._file.read(comp_size)
+            l = pylzma.decompress_compat(temp)
+        else:
+            print('No Compression')
+            l = self._file.read(decomp_size)
+
+        # Store New File Data
         t = open(location[0], 'rb')
         k = t.read()  # store file temporarily
         t.close()
+
+        # Create SchedulerEntry
+        sched = SchedulerEntry()
+        sched.name = f_name
+        sched.localOffset = off
+        sched.type = typ
+        sched.oldCompSize = comp_size
+        sched.oldDecompSize = decomp_size
+        sched.oldData = l
+        sched.newData = k
+
+        orExt = f_name.split('.')[-1].lower()
+        newExt = str(location[0].split('.')[-1]).lower()
+        if orExt == 'dds' and newExt in ['png', 'jpg', 'dds']:
+            print 'Replacing Texture'
+            self.import_texture(sched)
+            pass
+        elif newExt != orExt:
+            print 'Replacing with different file, Aborting...'
+            return
+
+        print(location)
+
+        return
+
         ''' OGG IMPORT '''
         if str(location[0]).split('.')[-1] == 'ogg' and subfile_type == 'OGG':
             print('importing ogg')
@@ -523,6 +656,9 @@ class IffEditorWindow(QMainWindow):
 
             self.addToScheduler(sched, k)  # Add to Scheduler
 
+    def import_texture(data):
+        pass
+
     def read_subfile(self, data):
         print('read_subfile function')
         selmod = self.archiveTable.selectionModel().selectedIndexes()
@@ -535,6 +671,10 @@ class IffEditorWindow(QMainWindow):
 
         self._file.seek(off)
         data = StringIO()
+
+        if not comp_size | decomp_size:
+            print 'Empty File'
+            return
 
         if typ == 'OGG':
             print('Loading OGG File')
@@ -568,40 +708,11 @@ class IffEditorWindow(QMainWindow):
         if ext == 'dds':
             print('Reading DDS File')
             image = dds_file(True, data)
+            self.glwidget.objects = []
+            gc.collect()
             self.glwidget.texture_setup(image)
 
-        elif ext == 'SCNE':
-            txtdata = str(data.read())
-            self.text_editor.clear()
-            self.text_editor.setPlainText(txtdata)
-            # Parsing Json in order to find out the correct model filename
-            jsondata = NbaJsonParser(txtdata)
-            # get binary file
-            binaryname = jsondata['Model']['player']['Binary']
-            print binaryname
-            t = StringIO()  # Prepare binary file
-            # Get binaryfiledata
-            for row in self.archiveContents.mylist:
-                if row[0] == binaryname:
-                    off = row[1]
-                    size = row[2]
-                    typ = row[4]
-                    print 'Model File data', off, size, typ
-                    # Most of the times it will be LZMA
-                    # I'm checking just in case
-                    if typ == 'LZMA':
-                        self._file.seek(off + 4)
-                        temp = self._file.read(size - 4)
-                        t.write(pylzma.decompress_compat(temp))
-                        t.seek(0)
-                    break
-            self.glwidget.customModel(parseModel(jsondata, t))
-            # modeldata = parseModel(dial.mode, data)
-            # vc, tc = len(modeldata[0]), len(modeldata[1])
-            # self.glwidget.customModel(modeldata)
-            # print vc, tc
-
-        elif ext in ['TXTR', 'RDAT']:
+        elif ext in ['TXTR', 'RDAT', 'json', 'SCNE']:
             '''TEXT FILES, PROBABLY JSONS'''
             if ext == 'RDAT':
                 '''RDAT FILES HAVE A 0x10 BYTE HEADER ON START
@@ -621,14 +732,6 @@ class IffEditorWindow(QMainWindow):
         gc.collect()
 
 
-class IffPanel(QWidget):
-
-    def __init__(self, parent=None):
-        super(IffPanel, self).__init__(parent)
-        self.setWindowTitle("Iff Panel")
-        self.setFixedSize(800, 600)
-
-
 class PreferencesWindow(QDialog):
 
     def __init__(self, parent=None):
@@ -639,6 +742,7 @@ class PreferencesWindow(QDialog):
             reg = ConnectRegistry(None, HKEY_LOCAL_MACHINE)
             key = OpenKey(reg, key)
             val, typ = QueryValueEx(key, 'InstallLocation')
+            print val, typ
             self.mainDirectory = os.path.abspath(val)
         except:
             self.mainDirectory = 'C:\\'
@@ -677,7 +781,7 @@ class PreferencesWindow(QDialog):
 
         horizontal_layout_3 = QHBoxLayout()
         lab = QLabel()
-        lab.setText("Select NBA 2K15 Directory: ")
+        lab.setText("Select NBA 2K16 Directory: ")
         horizontal_layout_3.addWidget(lab)
 
         settingsLineEdit = QLineEdit()
@@ -740,8 +844,8 @@ class PreferencesWindow(QDialog):
 
     def preferences_saveSettings(self):
         f = open('settings.ini', 'w')
-        f.writelines(('NBA 2K Explorer Settings File \n', 'Version 0.1 \n'))
-        f.write('NBA 2K15 Path : ' + self.mainDirectory + '\n')
+        f.writelines(('NBA 2K Explorer Settings File \n', 'Version 0.4 \n'))
+        f.write('NBA 2K16 Path : ' + self.mainDirectory + '\n')
         for child in self.pref_window_buttonGroup.children():
             if isinstance(child, QCheckBox):
                 f.write(
@@ -936,15 +1040,17 @@ class MyTableView(QTableView):
                                          QItemSelectionModel.Select | QItemSelectionModel.Rows)
 
     def mouseReleaseEvent(self, event):
+        row_mid = self.indexAt(event.pos())
         row_id = self.indexAt(event.pos()).row()
+
         # Release button
         self.down = False
         self.button = None
         if event.button() == Qt.MouseButton.LeftButton and \
                 len(self.selectionModel().selectedIndexes()) == len(self.model().header):
             '''Emit Clicked Signal'''
-            self.clicked.emit(row_id)
-        else:
+            self.clicked.emit(row_mid)
+        elif event.button() == Qt.MouseButton.RightButton:
             '''Handle Left Click Should Emit Ctx Request Signal'''
             self.customContextMenuRequested.emit(event.pos())
 

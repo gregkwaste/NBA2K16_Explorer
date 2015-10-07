@@ -11,7 +11,6 @@ from vlc_player import Player
 
 
 # external imports
-import gui2k
 from pygl_widgets import *
 from myqmodels import *
 
@@ -31,7 +30,7 @@ from subprocess import call
 # from pylzma import compress
 # from pysideuic.Compiler.qtproxies import QtGui
 from _winreg import *
-from nba2k15commonvars import *
+from nba2k16commonvars import *
 
 # Import Custom Modules/Libraries
 sys.path.append('../gk_blender_lib/modules')
@@ -396,12 +395,13 @@ class header:
             #        self.file_sizes.append(temp[self.sub_head_count*j])
 
 
-class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
+class MainWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
+        self.setWindowTitle('NBA2K16 Explorer v' + version)
         self.setWindowIcon(QIcon('tool_icon.ico'))
-        self.setupUi(self)
+        self.setupUi()
         self.actionOpen.triggered.connect(self.open_file_table)
         self.actionExit.triggered.connect(self.close_app)
         self.actionApply_Changes.triggered.connect(runScheduler)
@@ -413,6 +413,8 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
 
         self.pref_window = PreferencesWindow()  # preferences window
         self.iffEditorWindow = IffEditorWindow()
+        # Assign Corresponding Action
+        self.actionShowIffWindow.triggered.connect(self.iffEditorWindow.show)
 
         # self properties
         self._active_file = None
@@ -420,14 +422,141 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
         self.list_names = {}  # List that will contain all the game file names
         self.comments = {}  # Initialize Comments
         self.parse_comments()
+        print self.comments.keys()
+
+        self.about_dialog = AboutDialog()  # Create About Dialog
+
+    def setupUi(self):
+        # self.setObjectName("MainWindow")
+        self.resize(1400, 800)
+        sizePolicy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.sizePolicy().hasHeightForWidth())
+        self.setSizePolicy(sizePolicy)
+
+        # self.gridLayout = QGridLayout(self.centralwidget)
+        self.mainSplitter = QSplitter()
+        self.mainSplitter.setOrientation(QtCore.Qt.Horizontal)
+
+        # splitter is the Left Part Splitter
+        self.splitter = QSplitter(self.mainSplitter)
+        self.splitter.setLineWidth(1)
+        self.splitter.setOrientation(QtCore.Qt.Vertical)
+
+        # groupBox_2 stores the top left treeview
+        self.groupBox_2 = QGroupBox(self.splitter)
+        self.groupBox_2.setTitle("2K Archive List")
+        self.groupBox_2VLayout = QVBoxLayout(self.groupBox_2)
+        # ArchiveTabs is the widget which will store all the
+        # different archive contents
+        # I'm adding treeviews in the tab programmaticaly
+        self.archiveTabs = QTabWidget(self.groupBox_2)
+        self.archiveTabs.setMinimumSize(QtCore.QSize(0, 264))
+        self.archiveTabs.setTabPosition(QTabWidget.North)
+        self.archiveTabs.setTabShape(QTabWidget.Rounded)
+        self.archiveTabs.setObjectName("archiveTabs")
+        self.groupBox_2VLayout.addWidget(self.archiveTabs)
+
+        # Horizontal Layout stores the tab widgets search stuff
+        self.horizontalLayout = QHBoxLayout()
+        self.horizontalLayout.setObjectName("horizontalLayout")
+        self.searchLabel = QLabel(self.groupBox_2)
+        self.searchLabel.setText("Search:")
+        self.horizontalLayout.addWidget(self.searchLabel)
+        self.searchBar = QLineEdit(self.groupBox_2)
+        self.horizontalLayout.addWidget(self.searchBar)
+        self.groupBox_2VLayout.addLayout(self.horizontalLayout)
+
+        # treeView_2 will hold the archive contents
+        self.horizSplitter = QSplitter(self.splitter)
+        self.horizSplitter.setOrientation(QtCore.Qt.Horizontal)
+
+        self.groupBox = QGroupBox(self.horizSplitter)
+        self.groupBox.setTitle("Archive File List")
+        self.groupBoxVLayout = QVBoxLayout(self.groupBox)
+        # treeView_2 is the File List Treeview Bottom Left
+        self.treeView_2 = QTreeView(self.groupBox)
+        self.treeView_2.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.treeView_2.setEditTriggers(QAbstractItemView.DoubleClicked)
+        self.treeView_2.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.treeView_2.setUniformRowHeights(True)
+        self.treeView_2.setObjectName("treeView_2")
+        self.groupBoxVLayout.addWidget(self.treeView_2)
+        # self.gridLayout.addWidget(self.splitter, 0, 0, 1, 1)
+
+        # Right TabWidget
+        self.tabWidget = QTabWidget(self.horizSplitter)
+
+        # Tools Tab
+        self.tab = QWidget()
+        sizePolicy = QSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        # sizePolicy.setHeightForWidth(self.tab.sizePolicy().hasHeightForWidth())
+        self.tab.setSizePolicy(sizePolicy)
+        # self.tab.setMaximumSize(QtCore.QSize(16777215, 16777215))
+        self.verticalLayout = QVBoxLayout(self.tab)
+
+        self.tabWidget.addTab(self.tab, "AudioPlayer")
+        # self.gridLayout.addWidget(self.splitter_4, 0, 1, 1, 1)
+
+        self.setCentralWidget(self.mainSplitter)
+
+        # Status Bar
+        self.statusBar = QStatusBar(self)
+        self.statusBar.setStatusTip("")
+        self.statusBar.setSizeGripEnabled(True)
+        self.setStatusBar(self.statusBar)
+
+        # Define MenuBar
+        self.menubar = QMenuBar(self)
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 1276, 21))
+        # File Menu
+        self.menuFile = QMenu(self.menubar)
+        self.menuFile.setTitle("File")
+        # Options Menu
+        self.menuOptions = QMenu(self.menubar)
+        self.menuOptions.setTitle("Options")
+
+        self.actionOpen = QAction(self)
+        self.actionOpen.setText("Load Archives")
+        self.actionExit = QAction(self)
+        self.actionExit.setText("Exit")
+        self.actionPreferences = QAction(self)
+        self.actionPreferences.setText("Preferences")
+        self.actionApply_Changes = QAction(self)
+        self.actionApply_Changes.setText("Apply Changes")
+        self.actionSave_Comments = QAction(self)
+        self.actionSave_Comments.setText("Save Comments")
+        self.actionShowIffWindow = QAction(self)
+        self.actionShowIffWindow.setText("Show Iff Editor")
+
+        self.menuFile.addAction(self.actionOpen)
+        self.menuFile.addAction(self.actionApply_Changes)
+        self.menuFile.addAction(self.actionExit)
+        self.menuOptions.addAction(self.actionPreferences)
+        self.menuOptions.addAction(self.actionSave_Comments)
+        self.menuOptions.addAction(self.actionShowIffWindow)
 
         # About Dialog
         about_action = QAction(self.menubar)
         about_action.setText("About")
         about_action.triggered.connect(self.about_window)
-        self.menubar.addAction(about_action)
 
-        self.about_dialog = AboutDialog()  # Create About Dialog
+        # Add actions to menubar
+        self.menubar.addAction(self.menuFile.menuAction())
+        self.menubar.addAction(self.menuOptions.menuAction())
+        self.menubar.addAction(about_action)
+        self.setMenuBar(self.menubar)
+
+        self.tabWidget.setCurrentIndex(0)
+        self.archiveTabs.setCurrentIndex(-1)
+        QtCore.QMetaObject.connectSlotsByName(self)
+        self.setTabOrder(self.archiveTabs, self.searchBar)
+        self.setTabOrder(self.searchBar, self.treeView_2)
+        self.setTabOrder(self.treeView_2, self.tabWidget)
 
     def prepareUi(self):
         self.main_viewer_sortmodels = []  # List for sortmodels storage
@@ -447,28 +576,26 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
         self.searchBar.returnPressed.connect(self.mainViewerFilter)
 
         # Subfiles Treeview settings
-        self.treeView_2.doubleClicked.connect(self.read_subfile)
-        # self.treeView_2.activated.connect(self.read_subfile)
-        # self.treeView_2.entered.connect(self.read_subfile)
+        # self.treeView_2.doubleClicked.connect(self.read_subfile)
 
         self.treeView_2.setUniformRowHeights(True)
         self.treeView_2.header().setResizeMode(QHeaderView.Stretch)
 
         # Treeview 2 context menu
-        self.treeView_2.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-        self.treeView_2.customContextMenuRequested.connect(self.ctx_menu)
+        # self.treeView_2.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        # self.treeView_2.customContextMenuRequested.connect(self.ctx_menu)
 
         # Subfile Contents Treeview settings
-        self.treeView_3.clicked.connect(self.open_subfile)
+        # self.treeView_3.clicked.connect(self.open_subfile)
         # self.treeView_3.entered.connect(self.open_subfile)
 
-        self.treeView_3.setUniformRowHeights(True)
-        self.treeView_3.header().setResizeMode(QHeaderView.Stretch)
+        # self.treeView_3.setUniformRowHeights(True)
+        # self.treeView_3.header().setResizeMode(QHeaderView.Stretch)
 
         # GLWIDGET
-        self.glviewer = GLWidgetQ(self)
-        self.splitter_4.addWidget(self.glviewer)
-        self.glviewer.renderText(0.5, 0.5, "3dgamedevblog")
+        # self.glviewer = GLWidgetQ(self)
+        # self.splitter_4.addWidget(self.glviewer)
+        # self.glviewer.renderText(0.5, 0.5, "3dgamedevblog")
         # self.glviewer.changeObject()
 
         # self.glviewer.cubeDraw()
@@ -486,8 +613,8 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
         tablayout.addLayout(soundPlayerLayout)
 
         # Text Editor Tab
-        self.text_editor = QPlainTextEdit()
-        self.tabWidget.addTab(self.text_editor, "Text Editor")
+        # self.text_editor = QPlainTextEdit()
+        # self.tabWidget.addTab(self.text_editor, "Text Editor")
 
         # Import Scheduler
         self.scheduler = QTreeView()
@@ -550,6 +677,7 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
 
     def main_ctx_menu(self, position):
         '''CONTEXT MENU ON THE TOP-LEFT TABLEVIEW'''
+        print 'Executing Main Context'
         selmod = self.current_tableView.selectionModel().selectedIndexes()
         arch_name = self.archiveTabs.tabText(self.archiveTabs.currentIndex())
         name = self.current_sortmodel.data(selmod[0], Qt.DisplayRole)
@@ -615,24 +743,22 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
                 caption="Save File", dir=name, filter='*.iff')
             t = open(location[0], 'wb')
             f = open(self._active_file, 'rb')
-            f.seek(off)
+            # Explicitly handle ogg files
+            if 'wav' in name:
+                f.seek(off + 0x2C)
+            else:
+                f.seek(off)
             t.write(f.read(size))
             f.close()
             t.close()
             self.statusBar.showMessage(
                 'Exported .iff to : ' + str(location[0]))
-        elif res.text() == "Open in IFF Editor":
-            t = open(name, 'wb')
-            f = open(self._active_file, 'rb')
-            f.seek(off)
-            t.write(f.read(size))
-            f.close()
-            t.close()
-            print('Opening IFF Editor')
-            self.iffEditorWindow.show()
-            self.iffEditorWindow.openFile(name)
 
-    def test(self):  # Sub Archive Reader
+    def test(self, rowMid):  # Sub Archive Reader
+        # Check if Comments Section was Clicked
+        if rowMid.column() == 4:
+            self.tableview_edit_start(rowMid)
+            return
         ''' THIS IS THE FUNCTION THAT PARSES THE SELECTED
             SUBARCHIVE AFTER CLICK ON THE MAIN TABLEVIEW '''
         selmod = self.current_tableView.selectionModel().selectedIndexes()
@@ -640,10 +766,10 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
         if self.current_tableView_index == selmod[0].row():
             return
         arch_name = self.archiveTabs.tabText(self.archiveTabs.currentIndex())
+        name = self.current_sortmodel.data(selmod[0], Qt.DisplayRole)
         off = self.current_sortmodel.data(selmod[1], Qt.DisplayRole)
         size = self.current_sortmodel.data(selmod[3], Qt.DisplayRole)
 
-        print(int(selmod[4].flags()))
         if arch_name not in self._active_file:  # File not already opened
             try:
                 if isinstance(self._active_file_handle, file):
@@ -670,6 +796,17 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
         print('Handle Path : ', self._active_file_handle.name)
 
         gc.collect()
+
+        '''Check for audio files'''
+        if '.wav' in name:
+            # Get to proper Offset
+            self._active_file_data.seek(0x2C)
+            t = open('temp.ogg', 'wb')
+            t.write(self._active_file_data.read())
+            t.close()
+            self.sound_player.Stop()
+            self.sound_player.OpenFile('temp.ogg')
+            return
 
         ''' CALLING archive_parser TO PARSE THE SUBARCHIVE '''
         ''' LOC CONTAINS A FILE LIST WITH ALL THE SUBFILES DATA'''
@@ -708,6 +845,13 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
         self.treeView_2.sortByColumn(
             1, Qt.SortOrder.AscendingOrder)  # sort by offset
         self.current_tableView_index = selmod[0].row()
+        # Open File into the iff editor
+        print 'Opening File in Iff Editor'
+        self._active_file_data.seek(0)
+        self.iffEditorWindow._file = self._active_file_data
+        self.iffEditorWindow._fileProps.name = name
+        self.iffEditorWindow.openFileData()
+        self.iffEditorWindow.show()
 
     def open_file_table(self):
         ''' FUNCTION THAT INITIATES THE FILE ARCHIVES LOADING
@@ -873,19 +1017,28 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
             # Create the TableView and Assign Options
             table_view = MyTableView()
             table_view.setModel(sortmodel)
-            table_view.horizontalHeader().setResizeMode(QHeaderView.Stretch)
+            table_view.horizontalHeader().setResizeMode(QHeaderView.Interactive)
+            lid = table_view.horizontalHeader().logicalIndex(0)
+            table_view.horizontalHeader().resizeSection(lid, 900)
+            lid = table_view.horizontalHeader().logicalIndex(1)
+            table_view.horizontalHeader().resizeSection(lid, 75)
+            lid = table_view.horizontalHeader().logicalIndex(3)
+            table_view.horizontalHeader().resizeSection(lid, 60)
+            table_view.horizontalHeader().setStretchLastSection(True)
+
             table_view.horizontalHeader().setMovable(True)
+
             table_view.setSortingEnabled(True)
             table_view.sortByColumn(1, Qt.AscendingOrder)
             table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
             table_view.setSelectionMode(QAbstractItemView.SingleSelection)
             table_view.setEditTriggers(QAbstractItemView.SelectedClicked)
-            table_view.hideColumn(2)
+            table_view.hideColumn(2)  # Type
 
             # Functions
             table_view.clicked.connect(self.test)
-            table_view.doubleClicked.connect(self.tableview_edit_start)
-            table_view.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            # table_view.doubleClicked.connect(self.tableview_edit_start)
+            # table_view.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
             table_view.customContextMenuRequested.connect(self.main_ctx_menu)
 
             count += len(entry[3])
@@ -903,9 +1056,9 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
     def save_comments(self):
         print('Saving Comments')
 
-        f = open('NBA2K15_archiveComments.txt', 'w')
-        f.write('//NBA2K15 ARCHIVE COMMENTS\n')
-        f.write('//Created by NBA2K15 Explorer v' + version + '\n')
+        f = open('NBA2K16_archiveComments.txt', 'w')
+        f.write('//NBA2K16 ARCHIVE COMMENTS\n')
+        f.write('//Created by NBA2K16 Explorer v' + version + '\n')
         for i in range(self.archiveTabs.count()):
             fname = str(self.archiveTabs.tabText(i))  # Write the archive name
             f.write('//' + fname + '\n')
@@ -913,18 +1066,18 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
             for entry in tmodel.mylist:
                 if entry[4]:
                     f.write(
-                        str(entry[0].split('_')[-1]) + '\t' + str(entry[4]) + '\n')
+                        entry[0] + '\t' + str(entry[4]) + '\n')
         f.close()
 
     def parse_comments(self):
         print('Parsing Comments')
         try:
-            f = open('NBA2K15_archiveComments.txt')
+            f = open('NBA2K16_archiveComments.txt')
             for line in f.readlines():
                 if not line.startswith('//'):
                     split = line.rstrip().split('\t')
                     print(split[0], split[1])
-                    self.comments[int(split[0])] = split[1]
+                    self.comments[split[0]] = split[1]
             f.close()
         except:
             print('No Comments File Exists')
@@ -948,10 +1101,9 @@ class MainWindow(QMainWindow, gui2k.Ui_MainWindow):
                 if id1 >= val:
                     # self.main_list.append(it,('unknown_'+str(i),id1-val))
                     comm = ''
-                    if subarch_id in self.comments.keys():
-                        comm = self.comments[subarch_id]  # Try to load comment
-
                     name = self.list_names[archname][id1]
+                    if name in self.comments.keys():
+                        comm = self.comments[name]  # Try to load comment
                     self.list[j][3].append(
                         [name, id1 - val, sb, sa, comm])
                     subarch_id += 1

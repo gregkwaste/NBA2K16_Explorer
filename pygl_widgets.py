@@ -131,10 +131,12 @@ myVS = '''
 in vec3 vPosition;
 in vec2 uvPosition;
 in vec3 nPosition;
+//in mat4 projMat;
 out vec3 L,N;
 out vec2 texCoord;
 uniform vec3 theta;
-uniform float scale,panX,panY;
+uniform vec4 lightPos;
+uniform float scale,panX,panY,aspect;
 
 void main() {
     texCoord = uvPosition;
@@ -166,18 +168,27 @@ void main() {
     mat4 panning = mat4(1.0, 0.0, 0.0 , 0.0,
                       0.0, 1.0, 0.0, 0.0,
                       0.0, 0.0, 1.0, 0.0,
-                      panX, panY, 0.0, 1.0);
+                      panX*(scale+1.0), panY*(scale+1.0), 0.0, 1.0);
+
+    float w = 20.0*aspect*scale;
+    float h = 20.0*scale;
+    mat4 projMat = mat4(2.0/w, 0.0,  0.0, 0.0,
+                        0.0, 2.0/h,  0.0, 0.0,
+                        0.0, 0.0, -2.0/8000.0, 0.0,
+                        0.0, 0.0,  0.0, 1.0);
+
 
     mat4 mv = rz*ry*rx;
     vec4 pos = vec4(vPosition, 1.0);
-    vec4 lightPos = vec4(0.0, 20.0, 20.0, 0.0);
+    //vec4 lightPos = vec4(0.0, 5.0, -5.0, 1.0);
+    //lightPos = normalize(lightPos);
+    //vec4 lPos = normalize(lightPos);
     vec4 nPos = vec4(nPosition.x, nPosition.y,nPosition.z, 0.0);
     L = normalize(pos - lightPos).xyz;
-    L = (mv*vec4(L,1.0)).xyz;
+    L = (mv*vec4(L, 0.0)).xyz;
     N = normalize(mv*nPos).xyz;
 
-    gl_Position = panning * mv * sMat* pos;
-    gl_PointSize = 10.0;
+    gl_Position = projMat * panning * mv * pos;
     }
 '''
 
@@ -185,12 +196,12 @@ myFS = '''
 # version 330
 out vec4 gl_FragColor;
 in vec2 texCoord;
-in vec3 N,L;
+in vec3 N, L;
 void main() {
     float kd = max(dot(L,N), 0.0);
     vec3 light_diffuse = vec3(1.0, 1.0, 1.0);
     vec3 ambient = vec3(0.7, 0.7, 0.7);
-    vec3 mColor  = vec3(0.1, 0.1, 0.1);
+    vec3 mColor  = vec3(0.3, 0.3, 0.3);
     gl_FragColor = vec4(kd*light_diffuse*ambient + mColor, 1.0 );
 }
 '''
@@ -201,11 +212,19 @@ texVS = '''
 in vec3 vPosition;
 in vec2 uvPosition;
 out vec2 texCoord;
-uniform float scale;
+uniform float scale, aspect;
 
 void main() {
     texCoord = uvPosition;
-    gl_Position = vec4(vPosition, 1.0);
+
+    float w = 2.0*aspect;
+    float h = 2.0*scale;
+    mat4 projMat = mat4(2.0/w, 0.0,  0.0, 0.0,
+                        0.0, 2.0/h,  0.0, 0.0,
+                        0.0, 0.0, -2.0/1.0, 0.0,
+                        0.0, 0.0,  0.0, 1.0);
+
+    gl_Position = projMat*vec4(vPosition.x,vPosition.y,vPosition.z, 1.0);
     }
 '''
 
@@ -217,8 +236,59 @@ out vec4 gl_FragColor;
 uniform sampler2D Tex0;
 
 void main() {
-    gl_FragColor = texture2D(Tex0, texCoord);
-    //gl_FragColor = vec4(texCoord,0.0,1.0);
+    vec2 convPos = vec2(texCoord.x , 1.0-texCoord.y);
+    gl_FragColor = texture2D(Tex0, convPos);
+}
+'''
+
+lightVS = '''
+# version 330
+in vec3 vPosition;
+uniform vec3 theta;
+uniform float scale,panX,panY;
+
+void main(){
+    vec3 angles = radians( theta );
+    vec3 c = cos( angles );
+    vec3 s = sin( angles );
+
+    // Remeber: thse matrices are column-major
+    mat4 rx = mat4( 1.0,  0.0,  0.0, 0.0,
+            0.0,  c.x,  s.x, 0.0,
+            0.0, -s.x,  c.x, 0.0,
+            0.0,  0.0,  0.0, 1.0 );
+
+    mat4 ry = mat4( c.y, 0.0, -s.y, 0.0,
+            0.0, 1.0,  0.0, 0.0,
+            s.y, 0.0,  c.y, 0.0,
+            0.0, 0.0,  0.0, 1.0 );
+
+    mat4 rz = mat4( c.z, -s.z, 0.0, 0.0,
+            s.z,  c.z, 0.0, 0.0,
+            0.0,  0.0, 1.0, 0.0,
+            0.0,  0.0, 0.0, 1.0 );
+
+    mat4 panning = mat4(1.0, 0.0, 0.0 , 0.0,
+          0.0, 1.0, 0.0, 0.0,
+          0.0, 0.0, 1.0, 0.0,
+          panX*(scale+1.0), panY*(scale+1.0), 0.0, 1.0);
+    
+    mat4 mv = rz*ry*rx;
+    float w = 20.0*scale;
+    float h = 20.0*scale;
+    mat4 projMat = mat4(2.0/w, 0.0,  0.0, 0.0,
+                        0.0, 2.0/h,  0.0, 0.0,
+                        0.0, 0.0, -2.0/300, 0.0,
+                        0.0, 0.0,  0.0, 1.0);
+    gl_Position = projMat*panning*mv*vec4(vPosition,1.0);
+}
+'''
+
+lightFS = '''
+# version 330
+
+void main(){
+    gl_FragColor = vec4(0.0,0.0,1.0,1.0);
 }
 '''
 
@@ -231,6 +301,37 @@ def flattenlist(data):
                 l.append(float(j))
         else:
             l.append(i)
+    return l
+
+
+def orthoMatrix(left, right, bottom, top, near, far):
+    w = right - left
+    h = top - bottom
+    d = far - near
+    l = []
+    l.append(2.0 / w)
+    l.append(0.0)
+    l.append(0.0)
+    l.append(-(left + right) / w)
+
+    l.append(0.0)
+    l.append(2.0 / h)
+    l.append(0.0)
+    l.append(-(bottom + top) / h)
+
+    l.append(0.0)
+    l.append(0.0)
+    l.append(-2.0 / d)
+    l.append((near + far) / d)
+
+    l.append(0.0)
+    l.append(0.0)
+    l.append(0.0)
+    l.append(1.0)
+
+    #mat = np.array(l)
+    # mat =
+    # print mat
     return l
 
 
@@ -251,16 +352,18 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
 
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.object = 0
-        self.scale = 0.1
+        self.zoom = 1.0
+        self.scale = 1.0
+        self.aspect = 1.0
         self.panX = 0.0
         self.panY = 0.0
         self.xMov = 0.0
         self.yMov = 0.0
-        self.lightPos = [0., 0., 2.5, 1.0]
+        self.lightPos = [0.0, 0.0, 0.0, 1.0]
         self.sizeDiv = 1.0
         self.lastPos = QtCore.QPoint()
         self.info = False
-
+        self.wireframe = False
         # Object List
         self.objects = []
         # Model Data
@@ -366,14 +469,34 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
             raise(RuntimeError(GL.glGetShaderInfoLog(vertex)))
             raise(RuntimeError(GL.glGetShaderInfoLog(fragment)))
 
+        # Create Texture Program
+        lightprogram = GL.glCreateProgram()
+        vertex1 = GL.glCreateShader(GL.GL_VERTEX_SHADER)
+        fragment1 = GL.glCreateShader(GL.GL_FRAGMENT_SHADER)
+        # Load Sources to Objects
+        GL.glShaderSource(vertex1, lightVS)
+        GL.glShaderSource(fragment1, lightFS)
+        # Compile Shaders
+        GL.glCompileShader(vertex1)
+        GL.glCompileShader(fragment1)
+        # Use Shaders
+        GL.glAttachShader(lightprogram, vertex1)
+        GL.glAttachShader(lightprogram, fragment1)
+        # check compilation error
+        resultv = GL.glGetShaderiv(vertex1, GL.GL_INFO_LOG_LENGTH)
+        resultf = GL.glGetShaderiv(fragment1, GL.GL_COMPILE_STATUS)
+        if not (resultf & resultv):
+            raise(RuntimeError(GL.glGetShaderInfoLog(vertex1)))
+            raise(RuntimeError(GL.glGetShaderInfoLog(fragment1)))
+
         # Link Program
         GL.glLinkProgram(texprogram)
         GL.glLinkProgram(program)
-        # use First Program
+        GL.glLinkProgram(lightprogram)
+
         self.programs.append(program)
         self.programs.append(texprogram)
-        # GL.glLinkProgram(self.program)
-        # GL.glUseProgram(self.program)
+        self.programs.append(lightprogram)
 
     def initializeGL(self):
         # Setup Viewport
@@ -382,7 +505,6 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         self.qglClearColor(self.trolltechPurple.darker())
 
         self.compileShaders()
-        print self.programs
 
         # setup model
         verts, norms, faces = self.loadOBJ('blogtext.obj')
@@ -400,8 +522,6 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         # ob.iBuffer = glvbo.VBO(flattenlist(faces))
         # ob.nBuffer = glvbo.VBO(flattenlist(norms))
 
-        lightPos = [0., 0., 2.5, 1.0]
-
     def paintGL(self):
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         for ob in self.objects:
@@ -411,11 +531,9 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
             GL.glUseProgram(ob.program)
             # print ob.vBuffer, ob.uvBuffer, ob.nBuffer, ob.iBuffer
 
-            # if ob.program == self.programs[1] and self.activeTexture:
-            #    GL.glActiveTexture(GL.GL_TEXTURE0)
-            #    GL.glBindTexture(GL.GL_TEXTURE_2D, self.activeTexture)
-            #    GL.glUniform1i(GL.glGetUniformLocation(ob.program, "Tex0"), 0)
-
+            # Common Uniforms for both shaders
+            loc = GL.glGetUniformLocation(ob.program, "aspect")
+            GL.glUniform1f(loc, self.aspect)
             # Bind Vertex VBO
             ob.vBuffer.bind()
             activeBuffers.append(ob.vBuffer)
@@ -430,13 +548,19 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
                 GL.glUniform1f(loc, self.panX)
                 loc = GL.glGetUniformLocation(ob.program, "panY")
                 GL.glUniform1f(loc, self.panY)
-
                 # Update Scale in Shader
                 loc = GL.glGetUniformLocation(ob.program, "scale")
-                GL.glUniform1f(loc, self.scale)
+                GL.glUniform1f(loc, self.zoom)
                 # Update Theta in Shader
                 loc = GL.glGetUniformLocation(ob.program, "theta")
                 GL.glUniform3fv(loc, 1, self.theta)
+                # Update Light Position
+                loc = GL.glGetUniformLocation(ob.program, "lightPos")
+                GL.glUniform4fv(loc, 1, self.lightPos)
+            elif ob.program == self.programs[1]:
+                # Upate Texture Scale
+                loc = GL.glGetUniformLocation(ob.program, "scale")
+                GL.glUniform1f(loc, self.scale)
 
             if ob.uvBuffer:
                 # Bind UVs
@@ -459,24 +583,65 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
             ob.iBuffer.bind()
             activeBuffers.append(ob.iBuffer)
 
+            if not self.wireframe:
+                GL.glPolygonMode(GL.GL_FRONT, GL.GL_FILL)
+                GL.glPolygonMode(GL.GL_BACK, GL.GL_FILL)
+
+            else:
+                GL.glPolygonMode(GL.GL_FRONT, GL.GL_LINE)
+                GL.glPolygonMode(GL.GL_BACK, GL.GL_LINE)
+
             GL.glDrawElements(
                 GL.GL_TRIANGLES, ob.iLen, GL.GL_UNSIGNED_INT, None)
+
             # GL.glDrawArrays(GL.GL_POINTS, 0, ob.vLen)
             # Unbind everything
             for buf in activeBuffers:
                 buf.unbind()
 
+            # Render Light
+            if ob.program == self.programs[0]:
+                self.renderLight()
+
         # self.renderText(0.5, 0.5, "3dgamedevblog")
+
+    def renderLight(self):
+        GL.glUseProgram(self.programs[2])
+        # Update Theta in Shader
+        loc = GL.glGetUniformLocation(self.programs[2], "theta")
+        GL.glUniform3fv(loc, 1, self.theta)
+        # Upate Texture Scale
+        loc = GL.glGetUniformLocation(self.programs[2], "scale")
+        GL.glUniform1f(loc, self.scale)
+        # Update Panning
+        loc = GL.glGetUniformLocation(self.programs[2], "panX")
+        GL.glUniform1f(loc, self.panX)
+        loc = GL.glGetUniformLocation(self.programs[2], "panY")
+        GL.glUniform1f(loc, self.panY)
+
+        lightvbo = np.array(self.lightPos, dtype=np.float32)
+        lightvbo = glvbo.VBO(lightvbo)
+        lightvbo.bind()
+        vpos = GL.glGetAttribLocation(self.programs[2], "vPosition")
+        GL.glVertexAttribPointer(
+            vpos, 3, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
+        GL.glEnableVertexAttribArray(vpos)
+        GL.glPointSize(10.0)
+        GL.glDrawArrays(GL.GL_POINTS, 0, 1)
+        GL.glPointSize(1.0)
+        lightvbo.unbind()
 
     def resizeGL(self, width, height):
         side = min(width, height)
+        self.aspect = float(width) / height
+        # print self.aspect
         tex_side = self.tex_width / self.tex_height
         f_height = width / tex_side
 
-        if self.activeTexture:
-            GL.glViewport((width - side) / 2, (height - side) / 2, side, side)
-        else:
-            GL.glViewport(0, 0, width, height)
+        # if self.activeTexture:
+        #    GL.glViewport((width - side) / 2, (height - side) / 2, side, side)
+        # else:
+        GL.glViewport(0, 0, width, height)
 
         # print('Viewport Size: ', width, height, 'Sides: ', side, tex_side,
         #      'Texture Sizes: ', self.tex_width, self.tex_height)
@@ -485,8 +650,9 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         self.lastPos = QtCore.QPoint(event.pos())
 
     def wheelEvent(self, event):
-        self.scale += event.delta() * 0.00005
-        self.scale = max(self.scale, 0.005)
+        self.zoom -= event.delta() * 0.0005
+        self.zoom = max(self.zoom, 0.005)
+        # print self.zoom
         self.update()
 
     def mouseMoveEvent(self, event):
@@ -509,27 +675,26 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_I:
             self.info = not self.info
-            self.update()
         elif event.key() == QtCore.Qt.Key_1:
-            self.lightPos[2] += 1.0
-            self.update()
+            self.lightPos[2] += 0.1
         elif event.key() == QtCore.Qt.Key_3:
-            self.lightPos[2] -= 1.0
-            self.update()
+            self.lightPos[2] -= 0.1
         elif event.key() == QtCore.Qt.Key_4:
-            self.lightPos[1] += 1.0
-            self.update()
+            self.lightPos[1] += 0.1
         elif event.key() == QtCore.Qt.Key_6:
-            self.lightPos[1] -= 1.0
-            self.update()
+            self.lightPos[1] -= 0.1
         elif event.key() == QtCore.Qt.Key_7:
-            self.lightPos[0] += 1.0
-            self.update()
+            self.lightPos[0] += 0.1
         elif event.key() == QtCore.Qt.Key_9:
-            self.lightPos[0] -= 1.0
-            self.update()
+            self.lightPos[0] -= 0.1
         elif event.key() == QtCore.Qt.Key_R:
             print(self.lightPos, self.scale)
+        elif event.key() == QtCore.Qt.Key_Plus:
+            self.zoom -= 0.05
+        elif event.key() == QtCore.Qt.Key_Minus:
+            self.zoom += 0.05
+        elif event.key() == QtCore.Qt.Key_Space:
+            self.wireframe = not self.wireframe
 
     def cubeDraw(self):
         print('drawingCube')
@@ -581,8 +746,8 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         ob.nBuffer = glvbo.VBO(ob.nBuffer)
         ob.program = self.programs[0]
 
-        if self.objects:
-            self.objects.pop()
+        # if self.objects:
+        #    self.objects.pop()
         self.objects.append(ob)
 
     def makeTextureQuad(self):
@@ -704,7 +869,7 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
 
         self.tex_width = width
         self.tex_height = height
-
+        self.scale = float(width) / height
         self.image.data.seek(0)
 
         # set class texture size
@@ -752,8 +917,6 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
 
         # Changing Object
         ob = self.makeTextureQuad()
-        if self.objects:
-            self.objects.pop()
         self.objects.append(ob)
 
         # Update View
@@ -784,7 +947,7 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         elif res.text() == 'Make Coffee':
             print('Making Coffee for buddaking')
             verts, norms, faces = self.loadOBJ('coffee.obj')
-            self.object = self.customModel(faces, verts, norms)
+            self.customModel([verts, faces, [], norms])
 
         elif res.text() == 'Import Image':
             print('Importing Image')

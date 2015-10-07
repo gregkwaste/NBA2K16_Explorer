@@ -19,7 +19,7 @@ import webbrowser
 from shutil import copyfile
 from math import radians
 
-version_text = 'v0.8 Coded by gregkwaste'
+version_text = 'v0.9 Coded by gregkwaste'
 
 
 class Model2kPart:
@@ -144,6 +144,14 @@ class Model2k:
         else:
             print('Not Implemented vertex format: ', vformat)
 
+    def get_colors(self, vformat):
+        if vformat == "R8G8B8A8_UNORM":
+            return self.read_blendweights_unorm()
+        elif vformat == "R16G16B16A16_FLOAT":
+            return self.read_colors_half()
+        else:
+            print('Not Implemented vertex format: ', vformat)
+
     def write_verts(self, vformat, scale, verts):
         if vformat == "R16G16B16A16_SNORM":
             return self.write_vertices_half(scale, verts)
@@ -170,17 +178,19 @@ class Model2k:
         else:
             print('Not Implemented vertex format: ', vformat)
 
-    def get_normals(self, f):
-        if self.num2 == 2:
-            return self.read_vertices_float(f)
-        elif self.num2 == 1:
-            return self.read_normals_half(f)
+    def get_normals(self, vformat):
+        if vformat == "R32G32B32_FLOAT":
+            return self.read_vertices_float()
+        elif vformat == "R16G16B16A16_SNORM":
+            return self.read_normals_half()
         else:
             print('Wrong num2')
 
     def get_uvs(self, vformat, scale, offset):
         if vformat in ["R16G16_SNORM", "R16G16_FLOAT"]:
             return self.read_uvs_half(scale, offset)
+        elif vformat == "R16G16B16A16_FLOAT":
+            return self.read_uvs_half()
         else:
             print('Not Implemented uv format: ', vformat)
 
@@ -233,6 +243,38 @@ class Model2k:
             verts.append((-scale[0] * v1, scale[2] * v3, scale[1] * v2))
         return verts
 
+    def read_normals_half(self):
+        v_count = (self.size - 0x10) // 8
+        verts = []
+        for i in range(v_count):
+            v1 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
+            v2 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
+            v3 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
+            self.__file__.read(2)
+            verts.append((1.0 - v1, 1.0 - v3, 1.0 - v2))
+        return verts
+
+    def read_colors_half(self):
+        v_count = (self.size - 0x10) // 8
+        verts = []
+        for i in range(v_count):
+            v1 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
+            v2 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
+            v3 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
+            self.__file__.read(2)
+            verts.append((v1, v3, v2))
+        return verts
+
+    def read_uvs_half(self):
+        v_count = (self.size - 0x10) // 8
+        verts = []
+        for i in range(v_count):
+            v1 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
+            v2 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
+            self.__file__.read(4)
+            verts.append((v1, v2))
+        return verts
+
     def write_vertices_half(self, scale, verts):
         oldv_count = (self.size - 0x10) // 8
         if not scale:
@@ -250,24 +292,11 @@ class Model2k:
     def read_vertices_float3(self, scale):
         v_count = (self.size - 0x10) // 12
         verts = []
-        if not scale:
-            scale = [1., 1., 1., 1.]
         for i in range(v_count):
             v1 = struct.unpack('<f', self.__file__.read(4))[0]
             v2 = struct.unpack('<f', self.__file__.read(4))[0]
             v3 = struct.unpack('<f', self.__file__.read(4))[0]
-            verts.append((scale[0] * v1, scale[2] * v3, scale[1] * v2))
-        return verts
-
-    def read_normals_half(self, f):
-        v_count = (self.size - 0x10) // 8
-        verts = []
-        for i in range(v_count):
-            v1 = struct.unpack('<h', f.read(2))[0] / 65535.0
-            v2 = struct.unpack('<h', f.read(2))[0] / 65535.0
-            v3 = struct.unpack('<h', f.read(2))[0] / 65535.0
-            f.read(2)
-            verts.append((1.0 - v1, 1.0 - v3, 1.0 - v2))
+            verts.append((-scale[0] * v1, scale[2] * v3, scale[1] * v2))
         return verts
 
     def read_vertices_float(self, f, scale):
@@ -277,7 +306,7 @@ class Model2k:
             v1 = struct.unpack('<f', f.read(4))[0]
             v2 = struct.unpack('<f', f.read(4))[0]
             v3 = struct.unpack('<f', f.read(4))[0]
-            verts.append((scale * v1, scale * v3, scale * v2))
+            verts.append((scale[0] * v1, scale[2] * v3, scale[1] * v2))
         return verts
 
     def read_uvs_half(self, scale, offset):
@@ -485,6 +514,13 @@ def model_import(scn):
         modeldata.seek(sect.size + 4)
         # Parsing the Vertex Data
         index = mindex[model]['VertexFormat']
+        try:
+            scale = index[model]['Radius']
+        except:
+            print("Missing Radius Parameter")
+            scale = 1.0
+        scale = [scale, scale, scale]
+
         print('model: ', model)
 
         verts, binormals, tangents, uvs, blendindices, blendweights = [
@@ -498,10 +534,6 @@ def model_import(scn):
             if dataentry == 'POSITION0':
                 # parsing vertices
                 vformat = index[dataentry]['Format']
-                try:
-                    scale = index[dataentry]['Scale']
-                except:
-                    print("Missing Scale Parameter")
                 sect = Model2k(modeldata)
                 verts = sect.get_verts(vformat, scale)
             elif dataentry == 'BINORMAL0':

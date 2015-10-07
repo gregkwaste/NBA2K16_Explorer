@@ -52,10 +52,6 @@ class Ui_MainWindow(object):
         self.tab.setObjectName("tab")
         self.verticalLayout = QtGui.QVBoxLayout(self.tab)
         self.verticalLayout.setObjectName("verticalLayout")
-        self.treeView_3 = QtGui.QTreeView(self.tab)
-        self.treeView_3.setUniformRowHeights(True)
-        self.treeView_3.setObjectName("treeView_3")
-        self.verticalLayout.addWidget(self.treeView_3)
         self.tabWidget.addTab(self.tab, "")
         self.gridLayout.addWidget(self.splitter_4, 0, 1, 1, 1)
         self.splitter = QtGui.QSplitter(self.centralwidget)
@@ -133,13 +129,12 @@ class Ui_MainWindow(object):
         MainWindow.setTabOrder(self.archiveTabs, self.searchBar)
         MainWindow.setTabOrder(self.searchBar, self.treeView_2)
         MainWindow.setTabOrder(self.treeView_2, self.tabWidget)
-        MainWindow.setTabOrder(self.tabWidget, self.treeView_3)
 
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QtGui.QApplication.translate(
             "MainWindow", "NBA 2K16 Explorer", None, QtGui.QApplication.UnicodeUTF8))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab), QtGui.QApplication.translate(
-            "MainWindow", "Archive Explorer", None, QtGui.QApplication.UnicodeUTF8))
+            "MainWindow", "Tools", None, QtGui.QApplication.UnicodeUTF8))
         self.groupBox_2.setTitle(QtGui.QApplication.translate(
             "MainWindow", "2K Archives List", None, QtGui.QApplication.UnicodeUTF8))
         self.searchLabel.setText(QtGui.QApplication.translate(
