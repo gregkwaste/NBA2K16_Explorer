@@ -15,6 +15,10 @@ from json_parser import *
 from scheduler import *
 from dds import *
 from _winreg import *
+# Compression Libraries
+import zlib
+import pylzma
+import ziptest
 
 
 class ModelPanel(QDialog):
@@ -165,7 +169,7 @@ class AboutDialog(QWidget):
         lab = QLabel()
         lab.setAlignment(Qt.AlignCenter)
         lab.setText(
-            "<P><b><FONT COLOR='#000000' FONT SIZE = 5>NBA 2K15 Explorer v0.28</b></P></br>")
+            "<P><b><FONT COLOR='#000000' FONT SIZE = 5>NBA 2K16 Explorer v0.40</b></P></br>")
         layout.addWidget(lab)
         lab = QLabel()
         lab.setAlignment(Qt.AlignCenter)
@@ -175,7 +179,7 @@ class AboutDialog(QWidget):
 
         # textbox
         tex = QTextBrowser()
-        f = open("about.html")
+        f = open("./resources/about.html")
         tex.setHtml(f.read())
         f.close()
         tex.setOpenExternalLinks(True)
@@ -198,7 +202,7 @@ class IffEditorWindow(QMainWindow):
     def __init__(self, parent=None):
         super(IffEditorWindow, self).__init__(parent)
         self.setWindowTitle("NBA 2K16 - Iff Editor")
-
+        self.setWindowIcon(QIcon('./resources/tool_icon.ico'))
         # Window private properties
         self.archiveContents = MyTableModel([[]], [])
 
@@ -227,7 +231,6 @@ class IffEditorWindow(QMainWindow):
 
         self.archiveTable = MyTableView(parent=gbox)
         self.archiveTable.horizontalHeader().setResizeMode(QHeaderView.Interactive)
-
         self.archiveTable.horizontalHeader().setMovable(True)
         self.archiveTable.setSortingEnabled(True)
         self.archiveTable.sortByColumn(1, Qt.AscendingOrder)
@@ -285,11 +288,16 @@ class IffEditorWindow(QMainWindow):
         self.fileOpenAction.setText('Open File')
         self.fileOpenAction.triggered.connect(self.openFile)
 
+        self.fileSaveAction = QAction(self)
+        self.fileSaveAction.setText('Save File')
+        self.fileSaveAction.triggered.connect(self.saveFile)
+
         self.closeWindowAction = QAction(self)
         self.closeWindowAction.setText('Close')
         self.closeWindowAction.triggered.connect(self.closeWindow)
 
         self.fileMenu.addAction(self.fileOpenAction)
+        self.fileMenu.addAction(self.fileSaveAction)
         self.fileMenu.addAction(self.closeWindowAction)
 
         self.menubar.addAction(self.fileMenu.menuAction())
@@ -336,22 +344,49 @@ class IffEditorWindow(QMainWindow):
         if not self._file:
             print 'No Active File Handle'
             return
-
+        # Always seek to start
+        self._file.seek(0)
         # Add data to the Archive Contents Table
         self.archiveContents = MyTableModel(
             archive_parser(self._file),
             ['Name', 'Offset', 'Comp. Size', 'Decomp. Size', 'Type'])
         self.archiveTable.setModel(self.archiveContents)
-        self.archiveTable.horizontalHeader().setResizeMode(QHeaderView.ResizeToContents)
+        # self.archiveTable.horizontalHeader().setResizeMode(QHeaderView.ResizeToContents)
+        self.archiveTable.horizontalHeader().setResizeMode(QHeaderView.Interactive)
         self.archiveTable.horizontalHeader().setStretchLastSection(True)
-        # lid = self.archiveTable.horizontalHeader().logicalIndex(4)
-        # self.archiveTable.horizontalHeader().resizeSection(lid, 40)
+        lid = self.archiveTable.horizontalHeader().logicalIndex(0)
+        self.archiveTable.horizontalHeader().resizeSection(lid, 200)
+        lid = self.archiveTable.horizontalHeader().logicalIndex(1)
+        self.archiveTable.horizontalHeader().resizeSection(lid, 70)
+        lid = self.archiveTable.horizontalHeader().logicalIndex(2)
+        self.archiveTable.horizontalHeader().resizeSection(lid, 70)
+        lid = self.archiveTable.horizontalHeader().logicalIndex(3)
+        self.archiveTable.horizontalHeader().resizeSection(lid, 80)
 
         gc.collect()
         # print archive_parser(self._file)
 
+    def saveFile(self):
+        # Saving Memory Stream to Disk
+        location = QFileDialog.getSaveFileName(
+            caption="Save File", dir=self._fileProps.name, filter='*.iff')
+        if not location[0]:
+            return
+
+        self._file.seek(0)
+        f = open(location[0], 'wb')
+        f.write(self._file.read())
+        f.close()
+        self._file.seek(0)
+
     def closeWindow(self):
         print('Closing Window')
+        try:
+            self._file.close()
+        except:
+            # No Active File
+            pass
+        gc.collect()
         self.close()
 
     def archiveTableCtxMenu(self, pos):
@@ -529,7 +564,8 @@ class IffEditorWindow(QMainWindow):
 
         location = QFileDialog.getOpenFileName(
             caption="Select file for Import",
-            filter='*.zip;;*.png;;*.jpg;;*.dds;;*.model')
+            filter='Images (*.png;*.jpg;*.dds);;Archives (*.iff;*.zip);;2K16 Models (*.model)')
+        print(location)
         if not location[0]:
             return
 
@@ -555,20 +591,51 @@ class IffEditorWindow(QMainWindow):
         sched.type = typ
         sched.oldCompSize = comp_size
         sched.oldDecompSize = decomp_size
+        # oldData and newData contain the decompressed file bytes
         sched.oldData = l
         sched.newData = k
+        sched.newDecompSize = len(k)
 
         orExt = f_name.split('.')[-1].lower()
         newExt = str(location[0].split('.')[-1]).lower()
-        if orExt == 'dds' and newExt in ['png', 'jpg', 'dds']:
-            print 'Replacing Texture'
-            self.import_texture(sched)
-            pass
+        if orExt == 'dds':
+            if newExt in ['png', 'jpg']:
+                print 'Replacing Texture with Conversion'
+                # Calling the Texture Import Panel
+                res = ImportPanel()
+                res.exec_()
+
+                if res.ImportStatus:  # User has pressed the Import Button
+                    # Compress the Texture
+                    comp = res.CurrentImageType
+                    nmips = res.CurrentMipmap
+
+                    # print(originalImage.header.dwMipMapCount,nmips)
+
+                    print('Converting Texture file')
+                    self.statusBar.showMessage('Compressing Image...')
+                    status = call(['./nvidia_tools/nvdxt.exe', '-file', location[0],
+                                   comp, '-nmips', nmips, '-quality_production', '-output', 'temp.dds'])
+                    f = open('temp.dds', 'rb')
+
+                    sched.newData = f.read()
+                    f.close()
+
+                    res.destroy()
+                else:
+                    res.destroy()
+                    self.statusBar.showMessage('Import Canceled')
+                    return
+                self.import_texture(sched)
+            elif newExt == 'dds':
+                print 'Replacing Texture without Conversion'
+                self.import_texture(sched)
+            else:
+                print 'Not supported Image Type'
+
         elif newExt != orExt:
             print 'Replacing with different file, Aborting...'
             return
-
-        print(location)
 
         return
 
@@ -656,8 +723,27 @@ class IffEditorWindow(QMainWindow):
 
             self.addToScheduler(sched, k)  # Add to Scheduler
 
-    def import_texture(data):
-        pass
+    def import_texture(self, sched):
+        oldTex = dds_file(True, sched.oldData)
+        # Get Metadata from the dds file
+        restData = oldTex._get_rest_data()
+        print restData
+        newTex = dds_file(True, sched.newData)
+
+        # Change Texture Details
+        oldTex.header.dwWidth = newTex.header.dwWidth
+        oldTex.header.dwHeight = newTex.header.dwHeight
+        oldTex.header.dwMipMapCount = newTex.header.dwMipMapCount
+        oldTex.header.dwPitchOrLinearSize = newTex.header.dwPitchOrLinearSize
+        oldTex.data = newTex.data
+        # Get new texture back
+        sched.newData = oldTex.write_texture(dx10=True).read()
+
+        # Update the newData Information
+        sched.newData += restData
+        sched.newDecompSize = len(sched.newData) + len(restData)
+        # Write Data to Self Zip file
+        self.writeToZip(sched)
 
     def read_subfile(self, data):
         print('read_subfile function')
@@ -707,7 +793,7 @@ class IffEditorWindow(QMainWindow):
         ext = name.split('.')[-1]
         if ext == 'dds':
             print('Reading DDS File')
-            image = dds_file(True, data)
+            image = dds_file(True, data.read())
             self.glwidget.objects = []
             gc.collect()
             self.glwidget.texture_setup(image)
@@ -731,6 +817,53 @@ class IffEditorWindow(QMainWindow):
         data.close()
         gc.collect()
 
+    def writeToZip(self, sched):
+        # New File
+        self._file.seek(0)
+        f = StringIO()
+        f.write(self._file.read())
+        f.seek(0)
+        zipfile = ziptest.customZipFile(f)
+
+        # Modify the file into the zip
+        # Fix Local Header
+        compData = pylzma.compress(sched.newData, dictionary=24)
+        # compData += compData[0:len(compData) // 4]  # inflating file
+        chksm = zlib.crc32(sched.newData) & 0xFFFFFFFF
+        localHeader = zipfile.localHeaders[sched.name]
+        # Calculate Difference
+        diff = len(compData) + 4 - localHeader.compSize
+        localHeader.crc32 = chksm
+        localHeader.compSize = len(compData) + 4
+        localHeader.decompSize = sched.newDecompSize
+        localHeader.data = b'\x09\x16\x05\x00' + compData
+
+        # Fix Central Directory Headers
+
+        offset = 0
+        found = False
+        for i in range(len(zipfile.nameList)):
+            name = zipfile.nameList[i]
+            locHead = zipfile.localHeaders[name]
+            cdHeader = zipfile.cDHeaders[name]
+            offset += locHead.size + locHead.compSize  # Calculate CD offset
+            if cdHeader.name == sched.name:
+                found = True
+                cdHeader.crc32 = chksm
+                cdHeader.compSize = len(compData) + 4
+                cdHeader.decompSize = sched.newDecompSize
+            elif found:
+                cdHeader.relOff += diff
+
+        # Fix EoD HEader
+        eocd = zipfile.endOfCd
+        eocd.offsetOfCD = offset
+
+        self._file = StringIO()
+        self._file.write(zipfile._writeZip())
+        self.openFileData()
+        gc.collect()
+
 
 class PreferencesWindow(QDialog):
 
@@ -742,7 +875,7 @@ class PreferencesWindow(QDialog):
             reg = ConnectRegistry(None, HKEY_LOCAL_MACHINE)
             key = OpenKey(reg, key)
             val, typ = QueryValueEx(key, 'InstallLocation')
-            print val, typ
+            # print val, typ
             self.mainDirectory = os.path.abspath(val)
         except:
             self.mainDirectory = 'C:\\'
@@ -755,7 +888,10 @@ class PreferencesWindow(QDialog):
         for i in range(len(archiveName_list)):
             op_name = archiveName_list[i]
             button = QCheckBox(self)
-            button.setText(op_name + archiveName_discr[i])
+            if archiveName_discr[i]:
+                button.setText(op_name + archiveName_discr[i])
+            else:
+                button.setText(op_name + ' - PAD')
             button.setChecked(bool_dict[settings_dict[op_name]])
             horizontal_layout.addWidget(button, hpos, vpos)
             vpos += 1
@@ -1032,7 +1168,8 @@ class MyTableView(QTableView):
 
     def mouseMoveEvent(self, event):
         # Select Rows if button is down
-        if self.buttonDown and self.button == Qt.MouseButton.LeftButton:
+        # if self.buttonDown and self.button == Qt.MouseButton.LeftButton:
+        if self.buttonDown:
             row_mid = self.indexAt(event.pos())
             topright = self.model().index(row_mid.row(),
                                           len(self.model().header) - 1, QModelIndex())
@@ -1061,6 +1198,8 @@ class MyTableModel(QAbstractTableModel):
         QAbstractTableModel.__init__(self, parent=None, *args)
         self.mylist = mylist
         self.header = header
+        self.searchText = ''
+        self.searchHit = 0
 
     def rowCount(self, parent=None):
         return len(self.mylist)
@@ -1105,12 +1244,25 @@ class MyTableModel(QAbstractTableModel):
         """
         Find a layer in the model by it's name
         """
+        if name != self.searchText:
+            self.searchHit = 0
+        else:
+            self.searchHit += 1
+
+        self.searchText = name
         for colId in range(self.columnCount()):
             startindex = self.index(0, colId)
             items = self.match(startindex, Qt.DisplayRole, name,
-                               1, Qt.MatchExactly | Qt.MatchWrap | Qt.MatchContains)
+                               -1, Qt.MatchExactly | Qt.MatchWrap | Qt.MatchContains)
             try:
-                return items[0]
+                if (self.searchHit == len(items) - 1):
+                    temp = len(items) - 1
+                    self.searchHit = -1
+                else:
+                    temp = self.searchHit
+                print 'Selecting:', temp
+
+                return items[temp]
             except:
                 continue
         return QModelIndex()
@@ -1144,7 +1296,7 @@ class SortModel(QSortFilterProxyModel):
         return False
 
 
-app = QApplication(sys.argv)
-form = IffEditorWindow()
-form.show()
-app.exec_()
+# app = QApplication(sys.argv)
+# form = IffEditorWindow()
+# form.show()
+# app.exec_()

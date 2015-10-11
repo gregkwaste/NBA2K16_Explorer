@@ -400,13 +400,14 @@ class MainWindow(QMainWindow):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
         self.setWindowTitle('NBA2K16 Explorer v' + version)
-        self.setWindowIcon(QIcon('tool_icon.ico'))
+        self.setWindowIcon(QIcon('./resources/tool_icon.ico'))
         self.setupUi()
         self.actionOpen.triggered.connect(self.open_file_table)
         self.actionExit.triggered.connect(self.close_app)
-        self.actionApply_Changes.triggered.connect(runScheduler)
+        self.actionApply_Changes.triggered.connect(self.runScheduler)
         self.actionPreferences.triggered.connect(self.preferences_window)
         self.actionSave_Comments.triggered.connect(self.save_comments)
+        self.actionCreateManifest.triggered.connect(self.create_manifest)
         self.clipboard = QClipboard()
 
         self.prepareUi()
@@ -419,10 +420,13 @@ class MainWindow(QMainWindow):
         # self properties
         self._active_file = None
         self.list = []  # List that will contain all the game file info
-        self.list_names = {}  # List that will contain all the game file names
+        # List that will contain all the game file names
+        self.list_names = {}
+        # List that will contain all the game file allocation sizes
+        self.alloc_table = {}
         self.comments = {}  # Initialize Comments
         self.parse_comments()
-        print self.comments.keys()
+        # print self.comments.keys()
 
         self.about_dialog = AboutDialog()  # Create About Dialog
 
@@ -532,12 +536,17 @@ class MainWindow(QMainWindow):
         self.actionSave_Comments.setText("Save Comments")
         self.actionShowIffWindow = QAction(self)
         self.actionShowIffWindow.setText("Show Iff Editor")
+        self.actionCreateManifest = QAction(self)
+        self.actionCreateManifest.setText("Create Manifest")
 
         self.menuFile.addAction(self.actionOpen)
         self.menuFile.addAction(self.actionApply_Changes)
         self.menuFile.addAction(self.actionExit)
         self.menuOptions.addAction(self.actionPreferences)
         self.menuOptions.addAction(self.actionSave_Comments)
+        self.menuOptions.addAction(self.actionSave_Comments)
+        self.menuOptions.addAction(self.actionCreateManifest)
+
         self.menuOptions.addAction(self.actionShowIffWindow)
 
         # About Dialog
@@ -651,10 +660,22 @@ class MainWindow(QMainWindow):
 
     def set_currentTableData(self, index):
         # Setting Current Sortmodel, to the Sortmodel of the TableView of the
+        # Set active file
+        if not self.archiveTabs.tabText(index) in self._active_file:
+            try:
+                self._active_file_handle.close()
+            except:
+                pass
+            self._active_file = os.path.join(
+                self.mainDirectory, self.archiveTabs.tabText(index))
+            self._active_file_handle = open(self._active_file, 'rb')
         # Current Tab
         self.current_tableView = self.archiveTabs.widget(index)
-        self.current_sortmodel = self.current_tableView.model()
-        self.current_tableView_index = QModelIndex()
+        try:
+            self.current_sortmodel = self.current_tableView.model()
+            self.current_tableView_index = QModelIndex()
+        except:
+            print 'No Model in tableView'
 
     def mainViewerFilter(self):
         index = self.current_sortmodel.findlayer(self.searchBar.text())
@@ -671,6 +692,23 @@ class MainWindow(QMainWindow):
     def about_window(self):
         self.about_dialog.show()
 
+    # Create Custom Manifest File
+    def create_manifest(self):
+        file_name = os.path.join(self.mainDirectory, 'manifest_g')
+        f = open(file_name, 'w')
+        for arch in self.list:
+            if len(arch[3]) != 0:
+                for i in range(len(arch[3])):
+                    entry = arch[3][i]
+                    f.write(arch[0] + '\t' + entry[0] +
+                            ' ' + str(entry[6]) +
+                            ' ' + str(entry[3]) +
+                            ' ' + str(entry[7]) + '\n')
+            else:
+                f.write(arch[0] + '\t' + '[pad_file]' + ' ' +
+                        str(arch[1]) + ' 1 \n')
+        f.close()
+
     # Main Functions
     def visit_url(self):
         webbrowser.open('http:\\3dgamedevblog.com')
@@ -683,13 +721,13 @@ class MainWindow(QMainWindow):
         name = self.current_sortmodel.data(selmod[0], Qt.DisplayRole)
         off = self.current_sortmodel.data(selmod[1], Qt.DisplayRole)
         size = self.current_sortmodel.data(selmod[3], Qt.DisplayRole)
+        oaname = self.current_sortmodel.data(selmod[5], Qt.DisplayRole)
 
         menu = QMenu()
         menu.addAction(self.tr("Copy Offset"))
         menu.addAction(self.tr("Copy Name"))
         menu.addAction(self.tr("Import Archive"))
         menu.addAction(self.tr("Export Archive"))
-        menu.addAction(self.tr("Open in IFF Editor"))
 
         res = menu.exec_(
             self.current_tableView.viewport().mapToGlobal(position))
@@ -708,35 +746,40 @@ class MainWindow(QMainWindow):
             print('Importing iff File over: ', name, off, size)
 
             location = QFileDialog.getOpenFileName(
-                caption='Select .iff file', filter='*.iff')
+                caption='Select file', filter='2K16 Archive *.iff;;OGG Audio File *.ogg')
+
+            if not location[0]:
+                print 'Import Canceled'
+                return
             t = open(location[0], 'rb')
             k = t.read()  # store file temporarily
             t.close()
+
+            # Construct ogg
+            if 'wav' in name:
+                f = open(self._active_file, 'rb')
+                f.seek(off)
+                l = f.read(size)
+                f.close()
+                # Open the audio file right away
+                self.sound_player.Stop()
+                self.sound_player.OpenFile(location[0])
+                k = constructOgg(l, k, self.sound_player.metadata)
 
             # Create Scheduler Entry
             sched = SchedulerEntry()
             # Scheduler Props
 
             sched.name = name
-            sched.selmod = 0
-            sched.arch_name = self._active_file.split('\\')[-1]
-            sched.subarch_name = name
-            sched.subarch_offset = off
-            sched.subarch_size = size
-            sched.subfile_name = ''
-            sched.subfile_off = 0
-            sched.subfile_type = 'IFF'
-            sched.subfile_index = 0
-            sched.subfile_size = 0
-            sched.local_off = 0
+            sched.archName = arch_name
+            sched.oaId = oaname.split('_')[-1]  # Storing just the number
+            sched.localOffset = off
             sched.oldCompSize = size
-            sched.oldDecompSize = size
             sched.newCompSize = len(k)
-            sched.newDataSize = sched.newCompSize
-            sched.chksm = zlib.crc32(k)
-            sched.diff = sched.newCompSize - sched.oldCompSize
+            sched.newData = k
+            sched.type = name.split('.')[-1].upper()
 
-            self.addToScheduler(sched, k)  # Add to Scheduler
+            self.addToScheduler(sched)  # Add to Scheduler
 
         elif res.text() == 'Export Archive':
             location = QFileDialog.getSaveFileName(
@@ -744,10 +787,10 @@ class MainWindow(QMainWindow):
             t = open(location[0], 'wb')
             f = open(self._active_file, 'rb')
             # Explicitly handle ogg files
-            if 'wav' in name:
-                f.seek(off + 0x2C)
-            else:
-                f.seek(off)
+            # if 'wav' in name:
+            #    f.seek(off + 0x2C)
+            # else:
+            f.seek(off)
             t.write(f.read(size))
             f.close()
             t.close()
@@ -800,12 +843,13 @@ class MainWindow(QMainWindow):
         '''Check for audio files'''
         if '.wav' in name:
             # Get to proper Offset
-            self._active_file_data.seek(0x2C)
+            self._active_file_data.seek(0x2C + 0x2214)
             t = open('temp.ogg', 'wb')
             t.write(self._active_file_data.read())
             t.close()
             self.sound_player.Stop()
             self.sound_player.OpenFile('temp.ogg')
+
             return
 
         ''' CALLING archive_parser TO PARSE THE SUBARCHIVE '''
@@ -851,7 +895,7 @@ class MainWindow(QMainWindow):
         self.iffEditorWindow._file = self._active_file_data
         self.iffEditorWindow._fileProps.name = name
         self.iffEditorWindow.openFileData()
-        self.iffEditorWindow.show()
+        # self.iffEditorWindow.show()
 
     def open_file_table(self):
         ''' FUNCTION THAT INITIATES THE FILE ARCHIVES LOADING
@@ -866,6 +910,9 @@ class MainWindow(QMainWindow):
             except:
                 pass
 
+        # Clear SortModels
+        self.main_viewer_sortmodels = []
+
         gc.collect()
         # update mainDirectory
         self.mainDirectory = self.pref_window.mainDirectory
@@ -877,24 +924,19 @@ class MainWindow(QMainWindow):
         self._active_file_handle = open(self._active_file, 'rb')
 
         self.statusBar.showMessage('Getting archives...')
-        self.fill_archive_names()  # Fill Archive Names
+        self.fill_archive_names()  # Fill Archive Names and Allocation Sizes
         self.fill_archive_list()  # Fill Archive List
 
+        # Sort All File Entries
+        for arch in self.list:
+            arch[3] = sorted(arch[3], key=lambda s: s[1])
+
         try:
-            pass
             num = self.load_archive_database_tableview()
-            # Store file offsets
-            # for arch in self.list:
-            #     arch_name=arch[0]
-            #     f=open(str(arch_name)+'.txt','w')
-            #     f.write(' '.join(['Name','Offset','Size'])+'\n')
-            #     for entry in arch[3]:
-            #         f.write(' '.join([str(entry[0]),str(entry[1]),str(entry[3])])+'\n')
-            #     f.close()
         except:
             msgbox = QMessageBox()
             msgbox.setText(
-                "File Not Found\n Make sure you have selected the correct NBA 2K15 Installation Path")
+                "File Not Found\n Make sure you have selected the correct NBA 2K16 Installation Path")
             msgbox.exec_()
             return
 
@@ -918,16 +960,81 @@ class MainWindow(QMainWindow):
         sys.exit(0)
 
     def fill_archive_names(self):
-        file_name = self.mainDirectory + os.sep + 'manifest'
-        f = open(file_name, 'r')
-        for line in f.readlines():
-            archname = line.split('\t')[0]
-            split = line.split('\t')[1].lstrip().split(' ')
-            name = split[0]
-            offset = int(split[1])
-            if archname not in self.list_names.keys():
-                self.list_names[archname] = {}
-            self.list_names[archname][offset] = name
+        file_name = os.path.join(self.mainDirectory, 'manifest_g')
+        if not os.path.exists(os.path.join(self.mainDirectory, 'manifest_g')):
+            file_name = os.path.join(self.mainDirectory, 'manifest')
+            f = open(file_name, 'r')
+            for line in f.readlines():
+                archname = line.split('\t')[0]
+                split = line.split('\t')[1].lstrip().split(' ')
+                name = split[0]
+                offset = int(split[1])
+                if archname not in self.list_names.keys():
+                    self.list_names[archname] = {}
+                    self.alloc_table[archname] = {}
+                self.list_names[archname][offset] = name
+                self.alloc_table[archname][offset] = 0
+            f.close()
+        else:
+            f = open(file_name, 'r')
+            for line in f.readlines():
+                archname = line.split('\t')[0]
+                split = line.split('\t')[1].lstrip().split(' ')
+                name = split[0]
+                offset = int(split[1])
+                allocsize = int(split[2])
+                if archname not in self.list_names.keys():
+                    self.list_names[archname] = {}
+                    self.alloc_table[archname] = {}
+
+                self.list_names[archname][offset] = name
+                self.alloc_table[archname][offset] = allocsize
+            f.close()
+
+    def fill_alloc_table(self):
+        file_name = os.path.join(self.mainDirectory, 'alloctable_g')
+        if not os.path.exists(file_name):
+            print 'not found alloctable_g, Creating One'
+            self.write_alloc_table()
+            return
+        else:
+            print 'found alloctable_g'
+
+        t = StringIO()
+        f = open(file_name, 'rb')
+        t.write(f.read())
+        f.close()
+
+        for arch in self.list:
+            for entry in arch[3]:
+                oaIndex = int(entry[5].split('_')[-1])
+                t.seek(0x8 * oaIndex)
+                entry[7] = struct.unpack('<Q', t.read(0x8))[0]
+
+        t.close()
+
+    def write_alloc_table(self):
+        print 'Creating Allocation Table'
+        file_name = os.path.join(self.mainDirectory, 'alloctable_g')
+        tFileCount = 0
+        for arch in self.list:
+            tFileCount += len(arch[3])
+        print 'TotalFileCount', tFileCount
+        t = StringIO()
+        t.write(b'\x00' * tFileCount * 8)
+        print 'Wrote temp file'
+
+        for arch in self.list:
+            print 'Working on archive: ', arch[0]
+            for entry in arch[3]:
+                oaIndex = int(entry[5].split('_')[-1])
+                t.seek(oaIndex * 0x8)
+                t.write(struct.pack('<Q', entry[7]))
+        t.seek(0)
+
+        # write file to disk
+        f = open(file_name, 'wb')
+        f.write(t.read())
         f.close()
 
     def fill_archive_list(self):
@@ -947,7 +1054,7 @@ class MainWindow(QMainWindow):
             f.read(13 + 16)
             # print(name,hex(size),f.tell())
             # self.main_list.append(None,(name,s))
-            self.list.append((name, s, size, []))
+            self.list.append([name, s, size, []])
             print(name, s, size)
             archiveOffsets_list.append(s)
             s += size
@@ -1009,23 +1116,18 @@ class MainWindow(QMainWindow):
 
         count = 0
         print('Creating ', len(selected_archives), ' Tabs')
+
         for i in selected_archives:
             # Create TableViewModel
             entry = self.list[i]
             sortmodel = MyTableModel(
-                entry[3], ["Name", "Offset", "Type", "Size", "Comments"])
+                entry[3], ["Name", "Offset", "Type", "Size",
+                           "Comments", "0A Id", "Global Offset",
+                           "Allocated Size"])
             # Create the TableView and Assign Options
             table_view = MyTableView()
             table_view.setModel(sortmodel)
             table_view.horizontalHeader().setResizeMode(QHeaderView.Interactive)
-            lid = table_view.horizontalHeader().logicalIndex(0)
-            table_view.horizontalHeader().resizeSection(lid, 900)
-            lid = table_view.horizontalHeader().logicalIndex(1)
-            table_view.horizontalHeader().resizeSection(lid, 75)
-            lid = table_view.horizontalHeader().logicalIndex(3)
-            table_view.horizontalHeader().resizeSection(lid, 60)
-            table_view.horizontalHeader().setStretchLastSection(True)
-
             table_view.horizontalHeader().setMovable(True)
 
             table_view.setSortingEnabled(True)
@@ -1034,6 +1136,20 @@ class MainWindow(QMainWindow):
             table_view.setSelectionMode(QAbstractItemView.SingleSelection)
             table_view.setEditTriggers(QAbstractItemView.SelectedClicked)
             table_view.hideColumn(2)  # Type
+            table_view.hideColumn(5)  # 0A Id
+            table_view.hideColumn(6)  # Global Offset
+            table_view.hideColumn(7)  # Allocation Sizes
+            table_view.horizontalHeader().swapSections(3, 4)
+            table_view.horizontalHeader().swapSections(1, 3)
+
+            # Set Column Sizes
+            lid = table_view.horizontalHeader().logicalIndex(0)
+            table_view.horizontalHeader().resizeSection(lid, 400)
+            lid = table_view.horizontalHeader().logicalIndex(1)
+            table_view.horizontalHeader().resizeSection(lid, 700)
+            lid = table_view.horizontalHeader().logicalIndex(2)
+            table_view.horizontalHeader().resizeSection(lid, 60)
+            table_view.horizontalHeader().setStretchLastSection(True)
 
             # Functions
             table_view.clicked.connect(self.test)
@@ -1046,10 +1162,10 @@ class MainWindow(QMainWindow):
             # Store the sortmodel handles
             self.main_viewer_sortmodels.append(sortmodel)
             # Debugging Testing Archive size
-            size = 0
-            for subentry in entry[3]:
-                size += subentry[3]
-            print('Estimated Archive %s size: %d' % (entry[0], size))
+            # size = 0
+            # for subentry in entry[3]:
+            #    size += subentry[3]
+            # print('Estimated Archive %s size: %d' % (entry[0], size))
 
         return count
 
@@ -1069,6 +1185,9 @@ class MainWindow(QMainWindow):
                         entry[0] + '\t' + str(entry[4]) + '\n')
         f.close()
 
+        # Immediately reload new comments in the database
+        self.parse_comments()
+
     def parse_comments(self):
         print('Parsing Comments')
         try:
@@ -1076,7 +1195,7 @@ class MainWindow(QMainWindow):
             for line in f.readlines():
                 if not line.startswith('//'):
                     split = line.rstrip().split('\t')
-                    print(split[0], split[1])
+                    # print(split[0], split[1])
                     self.comments[split[0]] = split[1]
             f.close()
         except:
@@ -1090,10 +1209,10 @@ class MainWindow(QMainWindow):
         data.seek(0)
         # f=open('C:\\worker.txt','w')
         for i in range(length):
-            sa = struct.unpack('<Q', data.read(8))[0]
+            sa = struct.unpack('<Q', data.read(8))[0]  # Size
             id0 = struct.unpack('<I', data.read(4))[0]
-            sb = struct.unpack('<I', data.read(4))[0]
-            id1 = struct.unpack('<Q', data.read(8))[0]
+            sb = struct.unpack('<I', data.read(4))[0]  # Checksum???
+            id1 = struct.unpack('<Q', data.read(8))[0]  # Global Offset
             # f.write(id1)
             for j in range(count_0 - 1, -1, -1):
                 val = self.list[j][1]  # full archive calculated offset
@@ -1102,10 +1221,20 @@ class MainWindow(QMainWindow):
                     # self.main_list.append(it,('unknown_'+str(i),id1-val))
                     comm = ''
                     name = self.list_names[archname][id1]
+                    oaname = 'unknown_' + str(subarch_id)
+
+                    if self.alloc_table[archname][id1]:
+                        allocsize = self.alloc_table[archname][id1]
+                    else:
+                        allocsize = sa
+
                     if name in self.comments.keys():
                         comm = self.comments[name]  # Try to load comment
+                    # Saving iff size sa as the allocated size as well.
+                    # This is fixed up later
+
                     self.list[j][3].append(
-                        [name, id1 - val, sb, sa, comm])
+                        [name, id1 - val, sb, sa,  comm, oaname, id1, allocsize])
                     subarch_id += 1
                     break
 
@@ -1156,6 +1285,171 @@ class MainWindow(QMainWindow):
                     widget.deleteLater()
                 else:
                     self.clearLayout(item.layout())
+
+# Scheduler Functions
+# Since 2K16 Scheduler should be working just with iffs
+
+    def addToScheduler(self, sched):
+        if not self.scheduler_model:
+            self.scheduler_model = TreeModel(("SubName", "0A ID", "SubOffset",
+                                              "SubOldSize", "SubNewSize",
+                                              "SubType", "Archive"))
+            self.scheduler.setModel(self.scheduler_model)
+
+        parent = self.scheduler_model.rootItem
+        item = TreeItem((sched.name, sched.oaId, sched.localOffset,
+                         sched.oldCompSize, sched.newCompSize,
+                         sched.type, sched.archName),
+                        parent)
+        parent.appendChild(item)
+
+        self.schedulerFiles.append(sched.newData)
+
+    def runScheduler(self):
+        parent = self.scheduler_model.rootItem
+        rowCount = parent.childCount()
+        # print(rowCount)
+
+        for i in range(rowCount):
+            item = parent.child(i)
+            name, oaname, off, oldSize, newSize, subType, archName = [item.data(0),
+                                                                      item.data(1), item.data(2), item.data(3), item.data(4), item.data(5), item.data(6)]
+
+            print name, oaname, off, oldSize, newSize, subType, archName
+
+            diff = newSize - oldSize
+            print 'Size Difference: ', diff
+
+            self._active_file_handle.close()  # Close opened files
+            if archName not in self._active_file:  # check archive name
+                self._active_file = os.path.join(self.mainDirectory, archName)
+            print self._active_file
+
+            f = open(self._active_file, 'r+b')  # open big archive
+            f.seek(off)  # seek to iff offset
+            data = self.schedulerFiles[i]
+            # Locate index in database
+            dbIndex = 0
+            for i in range(len(self.list[archiveName_dict[archName]][3])):
+                entry = self.list[archiveName_dict[archName]][3][i]
+                if entry[5] == 'unknown_' + oaname:
+                    dbIndex = i
+                    allocsize = entry[7]
+                    break
+
+            if newSize <= allocsize:
+                print('Enough Space for File')
+                f.write(data)  # enough space for writing
+                # Change allocated memory value to table
+                # oaIndex = int(oaname.split('_')[-1])
+                # for entry in self.list[archiveName_dict[archName]][3]:
+                #    if entry[5].split('_')[-1] == oaname:
+                #        entry[7] += diff
+                #        print 'Changed Allocation Value'
+                #        break
+                f.close()
+
+                print 'Saving New Size to 0A'
+                f = open(self.mainDirectory + '\\' + '0A', 'r+b')
+                f.read(0x10)
+                arch_num = struct.unpack('<I', f.read(4))[0]
+                f.seek((arch_num + 1) * 0x30)  # seeking to archive definitions
+                f.seek(int(oaname) * 0x18, 1)  # Seek to subarchive
+                f.write(struct.pack('<Q', newSize))  # update its size
+                f.close()
+
+            else:
+                f.seek(oldSize, 1)  # Seek to end of original file
+                # Save big file tail to disk
+                tailPath = os.path.join(self.mainDirectory, 'tail')
+                tail = open(tailPath, 'wb')
+
+                buf = 1
+                while buf:
+                    buf = f.read(1024 * 1024 * 1024)
+                    print(len(buf))
+                    tail.write(buf)
+                tail.close()
+                print("Done Writing tail - TESTING")
+
+                # Write actual data to archive
+                f.seek(off)
+                f.write(data)
+
+                print("Writing back tail to big archive - TESTING")
+                # Writing back the tail
+                tail = open(tailPath, 'rb')
+                buf = 1
+                while buf:
+                    buf = tail.read(1024 * 1024 * 1024)
+                    f.write(buf)
+                tail.close()
+                os.remove(tailPath)  # Delete Tail File
+                f.close()
+
+                # Updating 0A database
+                f = open(self.mainDirectory + '\\' + '0A', 'r+b')
+                f.read(0x10)
+                arch_num = struct.unpack('<I', f.read(4))[0]
+                f.read(0xC)
+                file_count = struct.unpack('<I', f.read(4))[0]
+                f.read(0xC)
+                # seeking to archive definition position
+                f.seek(archiveName_dict[archName] * 0x30, 1)
+                s = struct.unpack('<Q', f.read(8))[0]
+                f.seek(-8, 1)
+                print('Writing ' + str(archName) + ' size to ', str(f.tell()))
+                f.write(struct.pack('<Q', s + diff))
+
+                f.seek((arch_num + 1) * 0x30)  # seeking to archive definitions
+                data_off = f.tell()  # store the data offset
+
+                # get global file id
+                subarch_id = int(oaname)
+                f.seek(subarch_id * 0x18, 1)
+                print('Found subarchive entry in ', f.tell())
+                s = struct.unpack('<Q', f.read(8))[0]
+                f.seek(-8, 1)
+                f.write(struct.pack('<Q', s + diff))  # update its size
+                f.seek(8, 1)
+                sub_arch_full_offset = struct.unpack('<Q', f.read(8))[0]
+
+                # Update size in database
+                print 'Prev Size: ', self.list[archiveName_dict[archName]][3][dbIndex][7]
+                self.list[archiveName_dict[archName]][3][dbIndex][7] = s + diff
+                self.list[archiveName_dict[archName]][3][dbIndex][3] = s + diff
+                print 'New Size: ', self.list[archiveName_dict[archName]][3][dbIndex][7]
+
+                # Update next file offsets
+                for arch in self.list:
+                    print('Seeking in: ', arch[0], arch[1], arch[2])
+                    for subarch in arch[3]:
+                        # find all siblings with larger offset
+                        test_val = subarch[1] + arch[1]
+                        if test_val > sub_arch_full_offset:
+                            subarch_name = subarch[5]
+                            subarch_id = int(subarch_name.split('_')[-1])
+                            f.seek(data_off + subarch_id * 0x18)
+                            f.seek(8 + 4 + 4, 1)
+                            # Changing id1 aka the offset
+                            s = struct.unpack('<Q', f.read(8))[0]
+                            f.seek(-8, 1)
+                            f.write(struct.pack('<Q', s + diff))
+                            # Change the database as well
+                            subarch[6] += diff
+                            subarch[1] += diff
+                f.close()
+
+            self.schedulerFiles.pop()
+            self.scheduler_model.rootItem.childItems.pop()
+            print('Scheduled Files left', len(self.schedulerFiles))
+
+        self.scheduler.setModel(None)
+        gc.collect()
+        self.statusBar.showMessage('Import Completed')
+        self.create_manifest()
+        print 'Reloading Table'
+        self.open_file_table()  # reload archives
 
 
 app = QApplication(sys.argv)

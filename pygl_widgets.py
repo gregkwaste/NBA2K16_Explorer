@@ -174,21 +174,21 @@ void main() {
     float h = 20.0*scale;
     mat4 projMat = mat4(2.0/w, 0.0,  0.0, 0.0,
                         0.0, 2.0/h,  0.0, 0.0,
-                        0.0, 0.0, -2.0/8000.0, 0.0,
+                        0.0, 0.0, -2.0/20000.0, 0.0,
                         0.0, 0.0,  0.0, 1.0);
 
 
     mat4 mv = rz*ry*rx;
-    vec4 pos = vec4(vPosition, 1.0);
-    //vec4 lightPos = vec4(0.0, 5.0, -5.0, 1.0);
+    vec4 pos = mv*vec4(vPosition, 1.0);
+    //vec4 lightPos = vec4(0.0, 5.0, -5.0, 0.0);
     //lightPos = normalize(lightPos);
     //vec4 lPos = normalize(lightPos);
+    //vec4 light = mv * lightPos
     vec4 nPos = vec4(nPosition.x, nPosition.y,nPosition.z, 0.0);
     L = normalize(pos - lightPos).xyz;
-    L = (mv*vec4(L, 0.0)).xyz;
     N = normalize(mv*nPos).xyz;
 
-    gl_Position = projMat * panning * mv * pos;
+    gl_Position = projMat * panning * pos;
     }
 '''
 
@@ -286,6 +286,7 @@ void main(){
 
 lightFS = '''
 # version 330
+out vec4 gl_FragColor;
 
 void main(){
     gl_FragColor = vec4(0.0,0.0,1.0,1.0);
@@ -359,7 +360,7 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         self.panY = 0.0
         self.xMov = 0.0
         self.yMov = 0.0
-        self.lightPos = [0.0, 0.0, 0.0, 1.0]
+        self.lightPos = [0.0, 0.0, 100.0, 0.0]
         self.sizeDiv = 1.0
         self.lastPos = QtCore.QPoint()
         self.info = False
@@ -463,11 +464,10 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         GL.glAttachShader(texprogram, vertex1)
         GL.glAttachShader(texprogram, fragment1)
         # check compilation error
-        resultv = GL.glGetShaderiv(vertex, GL.GL_INFO_LOG_LENGTH)
-        resultf = GL.glGetShaderiv(fragment, GL.GL_COMPILE_STATUS)
-        if not (resultf & resultv):
-            raise(RuntimeError(GL.glGetShaderInfoLog(vertex)))
-            raise(RuntimeError(GL.glGetShaderInfoLog(fragment)))
+        resultv = GL.glGetShaderiv(vertex1, GL.GL_INFO_LOG_LENGTH)
+        print GL.glGetShaderInfoLog(vertex1)
+        resultf = GL.glGetShaderiv(fragment1, GL.GL_COMPILE_STATUS)
+        print GL.glGetShaderInfoLog(fragment1)
 
         # Create Texture Program
         lightprogram = GL.glCreateProgram()
@@ -484,10 +484,9 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         GL.glAttachShader(lightprogram, fragment1)
         # check compilation error
         resultv = GL.glGetShaderiv(vertex1, GL.GL_INFO_LOG_LENGTH)
+        print GL.glGetShaderInfoLog(vertex1)
         resultf = GL.glGetShaderiv(fragment1, GL.GL_COMPILE_STATUS)
-        if not (resultf & resultv):
-            raise(RuntimeError(GL.glGetShaderInfoLog(vertex1)))
-            raise(RuntimeError(GL.glGetShaderInfoLog(fragment1)))
+        print GL.glGetShaderInfoLog(fragment1)
 
         # Link Program
         GL.glLinkProgram(texprogram)
@@ -505,20 +504,24 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         self.qglClearColor(self.trolltechPurple.darker())
 
         self.compileShaders()
-
+        # Setup TExture
+        f = open('./resources/2k16.dds', 'rb')
+        data = f.read()
+        f.close()
+        image = dds_file(True, data)
+        self.texture_setup(image)
         # setup model
-        verts, norms, faces = self.loadOBJ('blogtext.obj')
+        # verts, norms, faces = self.loadOBJ('blogtext.obj')
+        # ob = globject()
+        # ob.vBuffer = np.array(verts, dtype=np.float32)
+        # ob.vBuffer = glvbo.VBO(ob.vBuffer)
+        # ob.vLen = len(verts)
+        # ob.iBuffer = np.array(faces, dtype=np.int32)
+        # ob.iBuffer = glvbo.VBO(ob.iBuffer, target=GL.GL_ELEMENT_ARRAY_BUFFER)
+        # ob.iLen = len(faces) * 3
+        # ob.program = self.programs[0]
 
-        ob = globject()
-        ob.vBuffer = np.array(verts, dtype=np.float32)
-        ob.vBuffer = glvbo.VBO(ob.vBuffer)
-        ob.vLen = len(verts)
-        ob.iBuffer = np.array(faces, dtype=np.int32)
-        ob.iBuffer = glvbo.VBO(ob.iBuffer, target=GL.GL_ELEMENT_ARRAY_BUFFER)
-        ob.iLen = len(faces) * 3
-        ob.program = self.programs[0]
-
-        self.objects.append(ob)
+        # self.objects.append(ob)
         # ob.iBuffer = glvbo.VBO(flattenlist(faces))
         # ob.nBuffer = glvbo.VBO(flattenlist(norms))
 
@@ -600,8 +603,8 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
                 buf.unbind()
 
             # Render Light
-            if ob.program == self.programs[0]:
-                self.renderLight()
+            # if ob.program == self.programs[0]:
+            #    self.renderLight()
 
         # self.renderText(0.5, 0.5, "3dgamedevblog")
 
@@ -613,7 +616,7 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         # Upate Texture Scale
         loc = GL.glGetUniformLocation(self.programs[2], "scale")
         GL.glUniform1f(loc, self.scale)
-        # Update Panning
+        # Update
         loc = GL.glGetUniformLocation(self.programs[2], "panX")
         GL.glUniform1f(loc, self.panX)
         loc = GL.glGetUniformLocation(self.programs[2], "panY")
@@ -676,23 +679,23 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         if event.key() == QtCore.Qt.Key_I:
             self.info = not self.info
         elif event.key() == QtCore.Qt.Key_1:
-            self.lightPos[2] += 0.1
+            self.lightPos[2] += 0.5
         elif event.key() == QtCore.Qt.Key_3:
-            self.lightPos[2] -= 0.1
+            self.lightPos[2] -= 0.5
         elif event.key() == QtCore.Qt.Key_4:
-            self.lightPos[1] += 0.1
+            self.lightPos[1] += 0.5
         elif event.key() == QtCore.Qt.Key_6:
-            self.lightPos[1] -= 0.1
+            self.lightPos[1] -= 0.5
         elif event.key() == QtCore.Qt.Key_7:
-            self.lightPos[0] += 0.1
+            self.lightPos[0] += 0.5
         elif event.key() == QtCore.Qt.Key_9:
-            self.lightPos[0] -= 0.1
+            self.lightPos[0] -= 0.5
         elif event.key() == QtCore.Qt.Key_R:
-            print(self.lightPos, self.scale)
+            print(self.lightPos, self.scale, self.theta)
         elif event.key() == QtCore.Qt.Key_Plus:
-            self.zoom -= 0.05
+            self.zoom -= 0.5
         elif event.key() == QtCore.Qt.Key_Minus:
-            self.zoom += 0.05
+            self.zoom += 0.5
         elif event.key() == QtCore.Qt.Key_Space:
             self.wireframe = not self.wireframe
 
@@ -730,6 +733,8 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
         except:
             print 'Wrong Arguments'
         self.theta[0] = 90.
+        self.theta[1] = 0.
+
         self.vc = len(verts)
         self.fc = len(faces)
 
@@ -895,11 +900,11 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
                             typ, GL.GL_UNSIGNED_BYTE, image_data.data.read(buf_size))
         else:
             buf_size = self.image.header.dwPitchOrLinearSize
-            # print(hex(self.image.header.dwFlags),(self.image.header.dwFlags &
-            # 0xff000000)>>24)
-            if ((self.image.header.dwFlags & 0xff000000) >> 24) == 0x80:
-                print 'unswizzling'
-                self.image.unswizzle_2k()
+
+            # Remove the swizzle check 2016
+            # if ((self.image.header.dwFlags & 0xff000000) >> 24) == 0x80:
+            #    print 'unswizzling'
+            #    self.image.unswizzle_2k()
 
             GL.glEnable(GL.GL_BLEND)
             GL.glDisable(GL.GL_COLOR_LOGIC_OP)
@@ -925,9 +930,8 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
     def ctx_menu(self, position):
         menu = QMenu()
         menu.addAction(self.tr('Save Image'))
-        menu.addAction(self.tr('Import Image'))
-        menu.addAction(self.tr('Import Model'))
-        menu.addAction(self.tr('Export Model'))
+        # menu.addAction(self.tr('Import Image'))
+        # menu.addAction(self.tr('Export Model'))
         menu.addAction(self.tr('Make Coffee'))
 
         res = menu.exec_(self.mapToGlobal(position))
@@ -946,115 +950,29 @@ class GLWidgetQ(QtOpenGL.QGLWidget):
                 "Texture Saved to " + str(location[0]))
         elif res.text() == 'Make Coffee':
             print('Making Coffee for buddaking')
-            verts, norms, faces = self.loadOBJ('coffee.obj')
+            verts, norms, faces = self.loadOBJ('./resources/coffee.obj')
+            self.objects = []
             self.customModel([verts, faces, [], norms])
 
-        elif res.text() == 'Import Image':
-            print('Importing Image')
-            location = QtGui.QFileDialog.getOpenFileName(
-                caption="Open Image File", filter='*.dds ;; *.jpg ;; *.png')
-            # Reseting Color
-            self.qglColor(QtCore.Qt.white)
+        # elif res.text() == 'Export Model':
+        #     print('Saving Model to Wavefront OBJ')
+        #     location = QtGui.QFileDialog.getSaveFileName(
+        #         caption="Save File", filter='*.obj')
+        #     f = open(location[0], 'w')
 
-            # Changing Object
-            self.object = self.makeTextureQuad()
-            # Checking Rotation
-            self.xRot = 180 * 16.0
-            self.yRot = 0
-            self.zRot = 0
-            self.scale = 1.0
-            # print(self.xRot,self.yRot,self.zRot)
+        #     # writing data
+        #     f.write('o custom_mesh \n')
+        #     for v in self.verts:
+        #         f.write('v ' + ' '.join([str(vi) for vi in v]) + '\n')
+        #     f.write('usemtl None \n')
+        #     f.write('s off \n')
+        #     for face in self.faces:
+        #         f.write('f ' + ' '.join([str(fi + 1) for fi in face]) + '\n')
 
-            GL.glEnable(GL.GL_TEXTURE_2D)
-            GL.glEnable(GL.GL_BLEND)
-            # GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
-            GL.glBlendFunc(GL.GL_ONE_MINUS_DST_COLOR, GL.GL_ZERO)
-
-            GL.glDisable(GL.GL_LIGHTING)
-
-            GL.glTexParameterf(
-                GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_REPEAT)
-            GL.glTexParameterf(
-                GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_REPEAT)
-            GL.glTexParameterf(
-                GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
-            GL.glTexParameterf(
-                GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
-
-            # Loading New Image to Viewport
-            if not location[0].split('.')[-1] == 'dds':  # load normal textures
-                print('Normal Image')
-                im = Image.open(location[0], "r")
-                self.tex_width, self.tex_height = im.size
-                img_data = im.convert("RGBA").tostring("raw", "RGBA")
-                GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, 3, im.size[0], im.size[
-                                1], 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, img_data)
-            else:  # load dds
-                print('DDS Image')
-                f = open(location[0], 'rb')
-                im = dds_file(True, f)
-                self.tex_width = im.header.dwWidth
-                self.tex_height = im.header.dwHeight
-                self.MipMaps = im.header.dwMipMapCount
-
-                typ = ''.join(im.header.ddspf.dwFourCC)
-
-                self.image = im
-                self.loadDDS(typ, self.tex_width, self.tex_height, im)
-
-                f.close()
-
-            self.resizeGL(self.width(), self.height())
-            self.update()
-            self.win.scheduler_add_texture(im, location[0])
-
-        elif res.text() == 'Import Model':
-            print('Importing Mesh to Viewport')
-            location = QtGui.QFileDialog.getOpenFileName(
-                caption="Open Model File", filter='*')
-            # parse Model
-            t = open(location[0], 'rb')
-            t.seek(0x4)  # Skip Header
-            first = Model2k(t)
-            first.data = first.read_strips(t)
-            first.data = first.strips_to_faces()
-
-            # vertices
-            second = Model2k(t)
-            second.data = second.get_verts(t, 100.0)
-            print(len(second.data))
-            # normals
-            third = Model2k(t)
-            third.data = third.get_normals(t)
-            k = StringIO()
-            t.seek(0)
-            k.write(t.read())
-            k.seek(0)
-            t.close()
-            print('Mesh Vertex Count: ', len(second.data))
-
-            self.object = self.customModel(first.data, second.data, third.data)
-            self.win.scheduler_add_model(k)
-
-        elif res.text() == 'Export Model':
-            print('Saving Model to Wavefront OBJ')
-            location = QtGui.QFileDialog.getSaveFileName(
-                caption="Save File", filter='*.obj')
-            f = open(location[0], 'w')
-
-            # writing data
-            f.write('o custom_mesh \n')
-            for v in self.verts:
-                f.write('v ' + ' '.join([str(vi) for vi in v]) + '\n')
-            f.write('usemtl None \n')
-            f.write('s off \n')
-            for face in self.faces:
-                f.write('f ' + ' '.join([str(fi + 1) for fi in face]) + '\n')
-
-            f.close()
-            # StatusBar notification
-            self.window().statusBar.showMessage(
-                "Obj Saved to " + str(location[0]))
+        #     f.close()
+        #     # StatusBar notification
+        #     self.window().statusBar.showMessage(
+        #         "Obj Saved to " + str(location[0]))
 
     def loadOBJ(self, filename):
         numVerts = 0

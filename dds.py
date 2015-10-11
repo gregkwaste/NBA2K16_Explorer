@@ -32,7 +32,9 @@ class dds_header:
             raise TypeError
         if mode:
             try:
-                data = args[1]
+                data = StringIO()
+                data.write(args[1])
+                data.seek(0)
                 # print(type(data))
             except:
                 print('With Read mode you have to pass the image file')
@@ -55,6 +57,7 @@ class dds_header:
             self.dwCaps4 = 0
             self.dwReserved2 = 0
         else:
+            self.headerSize = 0
             self.dwmagic = struct.unpack('>I', data.read(4))[0]
             if not self.dwmagic == 0x44445320:
                 print(hex(self.dwmagic))
@@ -76,9 +79,11 @@ class dds_header:
             self.dwCaps3 = struct.unpack('<I', data.read(4))[0]
             self.dwCaps4 = struct.unpack('<I', data.read(4))[0]
             self.dwReserved2 = struct.unpack('<I', data.read(4))[0]
+            self.headerSize = 0x80
             # check for DX10 texture
             if ''.join(self.ddspf.dwFourCC) == 'DX10':
                 self.dwdx10header = dx10_header(True, data)
+                self.headerSize += 0x14
 
 
 class dx10_header:
@@ -185,10 +190,10 @@ class dds_file:
     def __init__(self, *args):
         self.header = dds_header(args[0], args[1])
         self.data = StringIO()
-        self.data.write(args[1].read())
-        self.data.seek(0)
+        self.data.write(args[1][self.header.headerSize:])
+        self.data.seek(0x0)
 
-    def write_texture(self):
+    def write_texture(self, dx10=False):
         t = StringIO()
         t.write(struct.pack('>I', 0x44445320))  # write DDS magic
         t.write(struct.pack('<7I', self.header.dwSize, self.header.dwFlags, self.header.dwHeight, self.header.dwWidth,
@@ -197,11 +202,16 @@ class dds_file:
             t.write(struct.pack('<I', i))
         t.write(
             struct.pack('<II', self.header.ddspf.dwSize, self.header.ddspf.dwFlags))
-        if self.header.ddspf.dwFourCC == ('D', 'X', '1', '0'):
-            temp_fourCC = list(
-                dx10_types[self.header.dwdx10header.dxgi_format])
-        else:
+
+        # Check for dx10 Option
+        if dx10:
             temp_fourCC = self.header.ddspf.dwFourCC
+        else:
+            if self.header.ddspf.dwFourCC == ('D', 'X', '1', '0'):
+                temp_fourCC = list(
+                    dx10_types[self.header.dwdx10header.dxgi_format])
+            else:
+                temp_fourCC = self.header.ddspf.dwFourCC
 
         for i in temp_fourCC:
             t.write(struct.pack('c', i))
@@ -210,9 +220,14 @@ class dds_file:
                             self.header.ddspf.dwBBitMask, self.header.ddspf.dwABitMask))
         t.write(struct.pack('<5I', self.header.dwCaps, self.header.dwCaps2,
                             self.header.dwCaps3, self.header.dwCaps4, self.header.dwReserved2))
-        # if self.header.ddspf.dwFourCC==('D','X','1','0'):
-        #    t.write(struct.pack('<5I',self.header.dwdx10header.dxgi_format,self.header.dwdx10header.d3d10_resource_dimension,
-        #                            self.header.dwdx10header.miscFlag,self.header.dwdx10header.arraySize,self.header.dwdx10header.miscFlags2))
+
+        if dx10:
+            if self.header.ddspf.dwFourCC == ('D', 'X', '1', '0'):
+                head = self.header.dwdx10header
+                t.write(struct.pack('<5I', head.dxgi_format,
+                                    head.d3d10_resource_dimension,
+                                    head.miscFlag, head.arraySize,
+                                    head.miscFlags2))
         self.data.seek(0)
         t.write(self.data.read())
         self.data.seek(0)
@@ -220,13 +235,8 @@ class dds_file:
         return t
 
     def _get_full_size(self):
-        if self.header.ddspf.dwFourCC == 'DX10':
-            size = 0x94
-        else:
-            size = 0x80
-
+        size = self.header.headerSize
         size += self._get_mipmap_size(self.header.dwMipMapCount)
-
         return size
 
     def _get_rest_size(self):
@@ -239,6 +249,13 @@ class dds_file:
         realImSize = len(self.data.read())
 
         return realImSize - im_size
+
+    def _get_rest_data(self):
+        fullSize = self._get_full_size()
+        self.data.seek(fullSize - self.header.headerSize)
+        data = self.data.read()
+        self.data.seek(0)
+        return data
 
     def _get_mipmap_size(self, count):
         w = self.header.dwWidth

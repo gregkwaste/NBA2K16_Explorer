@@ -251,7 +251,7 @@ class Model2k:
             v2 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
             v3 = struct.unpack('<h', self.__file__.read(2))[0] / 65535.0
             self.__file__.read(2)
-            verts.append((1.0 - v1, 1.0 - v3, 1.0 - v2))
+            verts.append((v1, v2, v3))
         return verts
 
     def read_colors_half(self):
